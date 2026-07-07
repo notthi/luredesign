@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ルアーデザイナー Phase 0 プロトタイプ</title>
+<style>
+  :root {
+    --bg: #10151c;
+    --panel: #1a222d;
+    --panel2: #232e3c;
+    --text: #e8edf2;
+    --sub: #8fa0b3;
+    --accent: #35b6ff;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --ng: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; background: var(--bg); color: var(--text); }
+  #app { display: flex; height: 100%; }
+  #viewport { flex: 1; position: relative; min-width: 0; min-height: 0; }
+  #viewport canvas { display: block; position: absolute; top: 0; left: 0; }
+  #panel {
+    width: 340px; flex-shrink: 0; background: var(--panel);
+    overflow-y: auto; padding: 16px; border-left: 1px solid #2c3948;
+  }
+  h1 { font-size: 15px; margin-bottom: 2px; }
+  .sub { color: var(--sub); font-size: 11px; margin-bottom: 14px; }
+  .section { background: var(--panel2); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .section h2 { font-size: 12px; color: var(--accent); margin-bottom: 10px; letter-spacing: 0.05em; }
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .row label { flex: 0 0 110px; font-size: 12px; color: var(--text); }
+  .row input[type=range] { flex: 1; accent-color: var(--accent); min-width: 0; }
+  .row .val { flex: 0 0 52px; font-size: 12px; text-align: right; color: var(--sub); font-variant-numeric: tabular-nums; }
+  select, button, input[type=number] {
+    background: #2c3948; color: var(--text); border: 1px solid #3d4d61;
+    border-radius: 6px; padding: 6px 8px; font-size: 13px;
+  }
+  select { width: 100%; }
+  .row input[type=number] { width: 70px; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 8px; cursor: pointer; }
+  .check input { accent-color: var(--accent); }
+  #stats, #action { font-size: 12px; line-height: 1.9; }
+  #stats .k, #action .k { color: var(--sub); }
+  #stats .v, #action .v { float: right; font-variant-numeric: tabular-nums; }
+  #buoyBadge {
+    display: block; text-align: center; font-weight: bold; font-size: 14px;
+    border-radius: 6px; padding: 7px; margin-top: 8px; background: #2c3948;
+  }
+  #dlBtn {
+    width: 100%; background: var(--accent); color: #06283c; font-weight: bold;
+    border: none; padding: 11px; font-size: 14px; cursor: pointer; border-radius: 8px;
+  }
+  #dlBtn:hover { filter: brightness(1.1); }
+  .note { font-size: 10.5px; color: var(--sub); margin-top: 8px; line-height: 1.5; }
+  .radio2 { display: flex; gap: 12px; font-size: 12px; margin-bottom: 8px; }
+  .radio2 label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #sizeGuard { font-size: 11px; margin-top: 6px; }
+  @media (max-width: 760px) {
+    #app { flex-direction: column; }
+    #viewport { flex: 0 0 44%; }
+    #panel { width: 100%; flex: 1; border-left: none; border-top: 1px solid #2c3948; }
+    .row input[type=range] { height: 28px; }   /* タッチの当たり判定を拡大 */
+    .check, select, button { min-height: 32px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="viewport"></div>
+  <div id="panel">
+    <h1>🎣 ルアーデザイナー</h1>
+    <div class="sub">Phase 0 技術スパイク — パラメトリック形状生成 / 浮力計算 / STL出力</div>
+
+    <div class="section">
+      <h2>テンプレート</h2>
+      <select id="preset"></select>
+    </div>
+
+    <div class="section">
+      <h2>ボディ形状</h2>
+      <div id="bodyControls"></div>
+    </div>
+
+    <div class="section">
+      <h2>リップ</h2>
+      <label class="check"><input type="checkbox" id="lipOn" checked> リップあり</label>
+      <div id="lipControls"></div>
+    </div>
+
+    <div class="section">
+      <h2>内部構造</h2>
+      <label class="check"><input type="checkbox" id="hollowOn" checked> 背部を中空化(下部ソリッド)</label>
+      <label class="check"><input type="checkbox" id="cutaway"> 断面表示(内部を確認)</label>
+      <div class="note">腹・ノーズ・テールはソリッドが残るため、ヒートン(ネジ式アイ)を直接ねじ込める。ヒートン下穴の自動配置は次スパイクで実装。</div>
+    </div>
+
+    <div class="section">
+      <h2>ウェイト・浮力 <span style="color:var(--sub);font-weight:normal">(PETG想定)</span></h2>
+      <div class="radio2">
+        <label><input type="radio" name="water" value="1.000" checked> 淡水</label>
+        <label><input type="radio" name="water" value="1.025"> 海水</label>
+      </div>
+      <div class="row">
+        <label>ウェイト+金具 (g)</label>
+        <input type="number" id="ballast" value="1.0" min="0" max="60" step="0.1">
+      </div>
+      <div id="stats"></div>
+      <span id="buoyBadge">—</span>
+      <div class="note">重量は生成メッシュ(下部ソリッド+背部中空、壁1.2mm)の実体積から算出。実測との誤差は試作で検証する。</div>
+    </div>
+
+    <div class="section">
+      <h2>アクション目安 <span style="color:var(--sub);font-weight:normal">(経験則)</span></h2>
+      <label class="check"><input type="checkbox" id="swimOn"> スイムプレビュー(演出)</label>
+      <div id="action"></div>
+      <div class="note">流体シミュレーションではなく形状指標からの推定。実機テストのデータを蓄積して係数(CALIB)を調整していく。</div>
+    </div>
+
+    <div class="section">
+      <h2>出力</h2>
+      <button id="dlBtn">⬇ STLダウンロード</button>
+      <div id="sizeGuard"></div>
+      <div class="note">単位: mm / 空洞入りボディ+リップの2シェル構成。スライスは壁3周・インフィル50%以上を推奨(ヒートン保持力)。左右分割・ウェイトチャンバー・ヒートン下穴は次スパイク。</div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+/* ================= パラメータ定義 ================= */
+
+const PARAM_DEFS = {
+  body: [
+    { key: 'length',   label: '全長 (mm)',        min: 30,  max: 150, step: 1,    def: 90 },
+    { key: 'height',   label: 'ボディ高 (mm)',    min: 4,   max: 34,  step: 0.5,  def: 14 },
+    { key: 'width',    label: 'ボディ幅 (mm)',    min: 3,   max: 26,  step: 0.5,  def: 10 },
+    { key: 'peak',     label: '張りの位置',       min: 0.2, max: 0.7, step: 0.01, def: 0.38 },
+    { key: 'noseFull', label: 'ヘッドの張り',     min: 0.35,max: 2.2, step: 0.01, def: 0.9 },
+    { key: 'tailFull', label: 'テールの絞り',     min: 0.35,max: 2.2, step: 0.01, def: 1.35 },
+    { key: 'balance',  label: '背腹バランス',     min: 0.3, max: 0.7, step: 0.01, def: 0.48 },
+    { key: 'section',  label: '断面(丸⇔角)',    min: 1.8, max: 5.0, step: 0.05, def: 2.3 },
+  ],
+  lip: [
+    { key: 'lipLen',   label: '長さ (mm)',        min: 4,  max: 30, step: 0.5, def: 12 },
+    { key: 'lipWidth', label: '幅 (mm)',          min: 4,  max: 24, step: 0.5, def: 9 },
+    { key: 'lipAngle', label: '角度 (°)',         min: 10, max: 80, step: 1,   def: 30 },
+  ],
+};
+
+const PRESETS = {
+  'アジング ミノー 45mm':   { length: 45, height: 6.5, width: 5,  peak: 0.4,  noseFull: 1.0, tailFull: 1.4,  balance: 0.5,  section: 2.2, lipOn: true,  lipLen: 6,  lipWidth: 5,  lipAngle: 45, ballast: 0.6 },
+  'トラウト ミノー 55mm':   { length: 55, height: 9,   width: 7,  peak: 0.38, noseFull: 0.95,tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 8,  lipWidth: 7,  lipAngle: 40, ballast: 1.2 },
+  'バス ミノー 90mm':       { length: 90, height: 14,  width: 10, peak: 0.38, noseFull: 0.9, tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 12, lipWidth: 9,  lipAngle: 30, ballast: 3.0 },
+  'クランクベイト 55mm':    { length: 55, height: 20,  width: 15, peak: 0.33, noseFull: 0.55,tailFull: 1.1,  balance: 0.44, section: 2.1, lipOn: true,  lipLen: 16, lipWidth: 13, lipAngle: 55, ballast: 3.5 },
+  'ポッパー 60mm':          { length: 60, height: 13,  width: 11, peak: 0.3,  noseFull: 0.42,tailFull: 1.2,  balance: 0.42, section: 2.4, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 2.0 },
+  'ペンシルベイト 100mm':   { length: 100,height: 13,  width: 11, peak: 0.42, noseFull: 0.8, tailFull: 1.1,  balance: 0.5,  section: 2.0, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 4.5 },
+  'シーバス ミノー 125mm':  { length: 125,height: 17,  width: 12, peak: 0.4,  noseFull: 0.95,tailFull: 1.3,  balance: 0.48, section: 2.5, lipOn: true,  lipLen: 14, lipWidth: 11, lipAngle: 22, ballast: 8.0 },
+};
+
+const state = {};
+for (const g of Object.values(PARAM_DEFS)) for (const p of g) state[p.key] = p.def;
+state.lipOn = true;
+state.hollow = true;
+
+/* ================= 材質・製造定数 ================= */
+
+const PETG_DENSITY = 1.27;   // g/cm3
+const WALL_MM = 1.2;         // 0.4mmノズル×3周
+const LIP_THICK = 1.6;       // mm
+const P1S_BED = 256;         // mm
+
+// アクション目安の係数。実機テスト(印刷→泳がせて観察)の結果を積み重ねてここを調整する。
+// デザインデータとは独立に管理し、係数を変えても保存済みデザインは影響を受けない。
+const CALIB = {
+  diveK: 0.05,      // 潜行深度係数 (mm×cos角 → m)
+  ampBase: 4,       // スイム振幅の下限 (deg)
+  ampK: 80,         // リップ面積比 → 振幅への寄与
+  ampMax: 25,       // 振幅上限 (deg)
+  freqK: 180,       // 周波数係数 (freqK / 全長mm = Hz)
+};
+
+/* ================= 形状生成 ================= */
+
+// t=0(ノーズ)〜1(テール)で 0→1→0 のプロファイル。peakで頂点位置、expF/expRで前後の張り
+function profile(t, peak, expF, expR) {
+  if (t <= 0 || t >= 1) return 0;
+  if (t < peak) return Math.pow(Math.sin(0.5 * Math.PI * (t / peak)), expF);
+  return Math.pow(Math.cos(0.5 * Math.PI * ((t - peak) / (1 - peak))), expR);
+}
+
+function buildBodyGeometry(s) {
+  const M = 110;         // 長手方向分割
+  const R = 56;          // 周方向分割
+  const L = s.length;
+  const positions = [];
+  const indices = [];
+
+  // 端の丸みを保つためコサイン分布でサンプリング
+  const ts = [];
+  for (let i = 0; i <= M; i++) ts.push(0.5 * (1 - Math.cos(Math.PI * i / M)));
+
+  const ringStart = [];
+  const exp2n = 2 / s.section;
+
+  for (let i = 0; i <= M; i++) {
+    const t = ts[i];
+    const p = profile(t, s.peak, s.noseFull, s.tailFull);
+    // 端は完全に0だと縮退するので極小半径でクランプ→ポールで閉じる
+    const pc = Math.max(p, 0.004);
+    const hTop = s.height * s.balance * pc;
+    const hBot = s.height * (1 - s.balance) * pc;
+    const hw = (s.width / 2) * pc;
+    const x = t * L;
+    ringStart.push(positions.length / 3);
+    for (let j = 0; j < R; j++) {
+      const th = (j / R) * Math.PI * 2;
+      const cu = Math.cos(th), sv = Math.sin(th);
+      const z = hw * Math.sign(cu) * Math.pow(Math.abs(cu), exp2n);
+      const hy = sv >= 0 ? hTop : hBot;
+      const y = hy * Math.sign(sv) * Math.pow(Math.abs(sv), exp2n);
+      positions.push(x, y, z);
+    }
+  }
+
+  // ポール頂点(ノーズ・テール)
+  const noseIdx = positions.length / 3;
+  positions.push(0, 0, 0);
+  const tailIdx = positions.length / 3;
+  positions.push(L, 0, 0);
+
+  // 側面
+  for (let i = 0; i < M; i++) {
+    const a = ringStart[i], b = ringStart[i + 1];
+    for (let j = 0; j < R; j++) {
+      const j2 = (j + 1) % R;
+      indices.push(a + j, b + j, b + j2);
+      indices.push(a + j, b + j2, a + j2);
+    }
+  }
+  // キャップ
+  const first = ringStart[0], last = ringStart[M];
+  for (let j = 0; j < R; j++) {
+    const j2 = (j + 1) % R;
+    indices.push(noseIdx, first + j2, first + j);
+    indices.push(tailIdx, last + j, last + j2);
+  }
+
+  orientOutward(positions, indices);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function smoothstep(u) { u = Math.min(Math.max(u, 0), 1); return u * u * (3 - 2 * u); }
+
+// 閉メッシュの符号付き体積から向きを判定し、外向き(invert=trueなら内向き)に揃える
+function orientOutward(positions, indices, invert = false) {
+  let vol = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] * 3, b = indices[i + 1] * 3, c = indices[i + 2] * 3;
+    vol += positions[a]     * (positions[b + 1] * positions[c + 2] - positions[b + 2] * positions[c + 1])
+         - positions[a + 1] * (positions[b]     * positions[c + 2] - positions[b + 2] * positions[c])
+         + positions[a + 2] * (positions[b]     * positions[c + 1] - positions[b + 1] * positions[c]);
+  }
+  const needFlip = invert ? vol > 0 : vol < 0;
+  if (needFlip) for (let i = 0; i < indices.length; i += 3) {
+    const t = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = t;
+  }
+}
+
+function buildLipGeometry(s) {
+  // 根元はアゴに馴染む太い断面、先端は薄い板へと連続的に絞るロフト形状
+  const U = 40, R = 28;
+  const tipHW = s.lipWidth / 2;
+  const tipHT = LIP_THICK / 2;
+  const tAttach = 0.07;
+  const p = profile(tAttach, s.peak, s.noseFull, s.tailFull);
+  const rootHW = Math.max((s.width / 2) * p * 0.9, tipHW * 0.5);   // 根元幅はアゴ幅に合わせる
+  const embed = 3;                                                  // ボディへの埋め込み量
+  const len = s.lipLen + embed;
+  const tipFrac = Math.min(tipHW / len, 0.35);
+
+  // 中心線: 曲げのない平板(リップ角のままの直線)
+  const aTip = THREE.MathUtils.degToRad(s.lipAngle);
+  const cx = [], cy = [], ca = [];
+  for (let i = 0; i <= U; i++) {
+    const d = len * (i / U);
+    ca.push(aTip);
+    cx.push(-Math.cos(aTip) * d);        // 前方 = -X
+    cy.push(-Math.sin(aTip) * d);
+  }
+
+  const positions = [], indices = [];
+  const exp2n = 2 / 2.4;
+  const ringStart = [];
+  for (let i = 0; i <= U; i++) {
+    const u = i / U;
+    let hw = rootHW + (tipHW - rootHW) * smoothstep(u / 0.55);      // 根元→板へ絞る
+    if (u > 1 - tipFrac) {                                          // 先端は半円に収束
+      const q = (u - (1 - tipFrac)) / tipFrac;
+      hw *= Math.sqrt(Math.max(1 - q * q, 0.0016));
+    }
+    const ht = tipHT;                                               // 厚みは全長で一定
+    const nx = -Math.sin(ca[i]), ny = Math.cos(ca[i]);              // 断面の上方向
+    ringStart.push(positions.length / 3);
+    for (let j = 0; j < R; j++) {
+      const th = (j / R) * Math.PI * 2;
+      const cu = Math.cos(th), sv = Math.sin(th);
+      const z = hw * Math.sign(cu) * Math.pow(Math.abs(cu), exp2n);
+      const off = ht * Math.sign(sv) * Math.pow(Math.abs(sv), exp2n);
+      positions.push(cx[i] + nx * off, cy[i] + ny * off, z);
+    }
+  }
+  const rootPole = positions.length / 3; positions.push(cx[0], cy[0], 0);
+  const tipPole = positions.length / 3;  positions.push(cx[U], cy[U], 0);
+
+  for (let i = 0; i < U; i++) {
+    const a = ringStart[i], b = ringStart[i + 1];
+    for (let j = 0; j < R; j++) {
+      const j2 = (j + 1) % R;
+      indices.push(a + j, b + j, b + j2);
+      indices.push(a + j, b + j2, a + j2);
+    }
+  }
+  const first = ringStart[0], last = ringStart[U];
+  for (let j = 0; j < R; j++) {
+    const j2 = (j + 1) % R;
+    indices.push(rootPole, first + j2, first + j);
+    indices.push(tipPole, last + j, last + j2);
+  }
+
+  orientOutward(positions, indices);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+
+  // アゴ下へ取り付け(根元を埋め込んで滑らかに繋げる)
+  const yBot = -s.height * (1 - s.balance) * p;
+  geo.translate(s.length * tAttach + embed * 0.6, yBot + 0.9, 0);
+  return geo;
+}
+
+// 背部空洞: 床=中心線(下部ソリッド)、天井=背中沿い(壁厚確保)。法線は内向き
+function buildCavityGeometry(s) {
+  const wall = WALL_MM;
+  if (s.height * s.balance - wall < 0.8 || s.width / 2 - wall < 0.6) return null; // 小型は中空化しない
+  const t0 = 0.14, t1 = 0.86;   // ノーズ・テールはソリッドで残す(ヒートン用)
+  const M = 72, R = 40;
+  const positions = [], indices = [];
+  const exp2n = 2 / s.section;
+  const ringStart = [];
+  for (let i = 0; i <= M; i++) {
+    const f = i / M;
+    const t = t0 + (t1 - t0) * f;
+    const ramp = smoothstep(f / 0.15) * smoothstep((1 - f) / 0.15);
+    const p = profile(t, s.peak, s.noseFull, s.tailFull);
+    const hTop = Math.max((s.height * s.balance * p - wall) * ramp, 0.02);
+    const hw = Math.max(((s.width / 2) * p - wall) * ramp, 0.02);
+    const x = t * s.length;
+    ringStart.push(positions.length / 3);
+    for (let j = 0; j < R; j++) {
+      const th = (j / R) * Math.PI * 2;
+      const cu = Math.cos(th), sv = Math.sin(th);
+      const z = hw * Math.sign(cu) * Math.pow(Math.abs(cu), exp2n);
+      const y = sv >= 0 ? hTop * Math.pow(sv, exp2n) : 0;   // 下半分は平らな床(下部ソリッド)
+      positions.push(x, y, z);
+    }
+  }
+  const nosePole = positions.length / 3; positions.push(t0 * s.length, 0.01, 0);
+  const tailPole = positions.length / 3; positions.push(t1 * s.length, 0.01, 0);
+
+  for (let i = 0; i < M; i++) {
+    const a = ringStart[i], b = ringStart[i + 1];
+    for (let j = 0; j < R; j++) {
+      const j2 = (j + 1) % R;
+      indices.push(a + j, b + j, b + j2);
+      indices.push(a + j, b + j2, a + j2);
+    }
+  }
+  const first = ringStart[0], last = ringStart[M];
+  for (let j = 0; j < R; j++) {
+    const j2 = (j + 1) % R;
+    indices.push(nosePole, first + j2, first + j);
+    indices.push(tailPole, last + j, last + j2);
+  }
+
+  orientOutward(positions, indices, true);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/* ================= 計測(体積・表面積) ================= */
+
+function measure(geo) {
+  const pos = geo.getAttribute('position');
+  const idx = geo.getIndex();
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const ab = new THREE.Vector3(), ac = new THREE.Vector3(), cr = new THREE.Vector3();
+  let vol = 0, area = 0;
+  const n = idx ? idx.count : pos.count;
+  for (let i = 0; i < n; i += 3) {
+    const i0 = idx ? idx.getX(i) : i, i1 = idx ? idx.getX(i + 1) : i + 1, i2 = idx ? idx.getX(i + 2) : i + 2;
+    a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2);
+    vol += a.dot(cr.copy(b).cross(c)) / 6;               // 発散定理
+    area += ab.copy(b).sub(a).cross(ac.copy(c).sub(a)).length() / 2;
+  }
+  return { volumeMm3: Math.abs(vol), areaMm2: area };
+}
+
+/* ================= シーン ================= */
+
+const viewport = document.getElementById('viewport');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+viewport.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x10151c);
+scene.fog = new THREE.Fog(0x10151c, 400, 900);
+
+const camera = new THREE.PerspectiveCamera(40, 1, 1, 2000);
+camera.position.set(90, 55, 150);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x2a3340, 1.0));
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+key.position.set(80, 120, 100);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x66aaff, 0.8);
+rim.position.set(-100, 30, -80);
+scene.add(rim);
+
+const grid = new THREE.GridHelper(300, 30, 0x2c3948, 0x1e2835);
+grid.position.y = -40;
+scene.add(grid);
+
+const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0xdde6ee, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.25, side: THREE.DoubleSide });
+const lipMat = new THREE.MeshPhysicalMaterial({ color: 0x9fd8ff, roughness: 0.15, transmission: 0.55, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+const eyeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 });
+const wireMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.3 });
+
+const lureGroup = new THREE.Group();
+scene.add(lureGroup);
+
+let bodyMesh = null, lipMesh = null;
+let lastMeasure = { dispMm3: 0, matMm3: 0 };
+let swimEnabled = false;
+const swim = { amp: 8, freq: 2, roll: 3 };   // updateAction() が毎回更新
+
+function rebuild() {
+  const t0 = performance.now();
+  lureGroup.clear();
+  bodyMesh?.geometry.dispose();
+  lipMesh?.geometry.dispose();
+  lipMesh = null;
+
+  const s = state;
+  const outerGeo = buildBodyGeometry(s);
+  const cavGeo = s.hollow ? buildCavityGeometry(s) : null;
+  const bodyGeo = cavGeo ? mergeGeometries([outerGeo, cavGeo]) : outerGeo;
+  bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+  lureGroup.add(bodyMesh);
+
+  let lipVol = 0;
+  if (s.lipOn) {
+    const lipGeo = buildLipGeometry(s);
+    lipMesh = new THREE.Mesh(lipGeo, lipMat);
+    lureGroup.add(lipMesh);
+    lipVol = measure(lipGeo).volumeMm3;
+  }
+
+  // 演出用: 目玉・アイ(STLには含めない)
+  addDressing(s);
+
+  // 中心へ寄せる
+  lureGroup.position.set(-s.length / 2, 0, 0);
+
+  const dispMm3 = measure(outerGeo).volumeMm3 + lipVol;  // 外形体積 = 排水量
+  const matMm3 = measure(bodyGeo).volumeMm3 + lipVol;    // 実材料体積(空洞差引済み)
+  if (cavGeo) { outerGeo.dispose(); cavGeo.dispose(); }
+  lastMeasure = { dispMm3, matMm3 };
+  updateStats(performance.now() - t0);
+}
+
+function addDressing(s) {
+  const pEye = profile(0.16, s.peak, s.noseFull, s.tailFull);
+  const hw = (s.width / 2) * pEye;
+  const ey = s.height * s.balance * pEye * 0.35;
+  const eyeR = Math.max(1, s.height * 0.09);
+  for (const side of [1, -1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 16, 12), eyeMat);
+    eye.position.set(s.length * 0.16, ey, side * hw * 0.92);
+    eye.scale.z = 0.45;
+    lureGroup.add(eye);
+  }
+  // ラインアイ・フックアイ(トーラス)
+  const ringGeo = new THREE.TorusGeometry(1.6, 0.45, 8, 16);
+  const spots = [
+    { t: 0.001, dy: 0.2, rot: 0 },                       // ラインアイ(ノーズ)
+    { t: 0.45, dy: -1.05, rot: 0 },                      // 腹
+    { t: 0.999, dy: 0.0, rot: 0 },                       // テール
+  ];
+  for (const sp of spots) {
+    const p = profile(Math.min(Math.max(sp.t, 0.02), 0.98), s.peak, s.noseFull, s.tailFull);
+    const ring = new THREE.Mesh(ringGeo, wireMat);
+    let x = sp.t * s.length, y;
+    if (sp.dy < 0) y = -s.height * (1 - s.balance) * p - 1.2;
+    else if (sp.t < 0.01) { y = 0; x = -1.2; }
+    else { x = s.length + 1.2; y = 0; }
+    ring.position.set(x, y, 0);
+    lureGroup.add(ring);
+  }
+}
+
+/* ================= 浮力・統計 ================= */
+
+function updateStats(genMs) {
+  const dispCm3 = lastMeasure.dispMm3 / 1000;            // 外形体積 = 全没時の排水量
+  const matCm3 = lastMeasure.matMm3 / 1000;              // 実材料体積(空洞差引)
+  const waterRho = parseFloat(document.querySelector('input[name=water]:checked').value);
+  const ballast = parseFloat(document.getElementById('ballast').value) || 0;
+
+  const bodyW = matCm3 * PETG_DENSITY;
+  const totalW = bodyW + ballast;
+  const dispW = dispCm3 * waterRho;
+  const ratio = totalW / dispW;
+
+  const fmt = (v, d = 1) => v.toFixed(d);
+  document.getElementById('stats').innerHTML = `
+    <div><span class="k">排水量(外形体積)</span><span class="v">${fmt(dispCm3, 2)} cm³</span></div>
+    <div><span class="k">材料体積(空洞差引)</span><span class="v">${fmt(matCm3, 2)} cm³</span></div>
+    <div><span class="k">ボディ+リップ重量</span><span class="v">${fmt(bodyW)} g</span></div>
+    <div><span class="k">総重量(+ウェイト)</span><span class="v"><b>${fmt(totalW)} g</b></span></div>
+    <div><span class="k">浮くための上限</span><span class="v">${fmt(dispW)} g</span></div>
+    <div><span class="k">形状生成</span><span class="v">${genMs.toFixed(0)} ms</span></div>
+  `;
+
+  const badge = document.getElementById('buoyBadge');
+  if (ratio < 0.97) { badge.textContent = `フローティング (浮力余裕 ${fmt(dispW - totalW)} g)`; badge.style.color = 'var(--ok)'; }
+  else if (ratio <= 1.03) { badge.textContent = 'サスペンド (ほぼ中性浮力)'; badge.style.color = 'var(--warn)'; }
+  else { badge.textContent = `シンキング (超過 ${fmt(totalW - dispW)} g)`; badge.style.color = 'var(--ng)'; }
+
+  const guard = document.getElementById('sizeGuard');
+  const maxDim = state.length + (state.lipOn ? state.lipLen : 0);
+  guard.innerHTML = maxDim <= P1S_BED
+    ? `<span style="color:var(--ok)">✔ P1S 造形範囲内 (最大寸法 約${fmt(maxDim, 0)}mm / ${P1S_BED}mm)</span>`
+    : `<span style="color:var(--ng)">✖ P1S 造形範囲超過</span>`;
+
+  updateAction(totalW, ballast);
+}
+
+// 経験則ベースのアクション指標。係数は CALIB(実機データで調整)
+function updateAction(totalW, ballast) {
+  const s = state;
+  // ボディ側面積の近似: ∫高さ dx
+  let sideMm2 = 0;
+  const N = 48;
+  for (let i = 0; i < N; i++) {
+    const t = (i + 0.5) / N;
+    sideMm2 += s.height * profile(t, s.peak, s.noseFull, s.tailFull) * (s.length / N);
+  }
+  const lipAreaMm2 = s.lipOn ? s.lipWidth * s.lipLen * 0.9 : 0;
+  const idx = sideMm2 > 0 ? lipAreaMm2 / sideMm2 : 0;          // ウォブル強度指標
+  const aRad = THREE.MathUtils.degToRad(s.lipAngle);
+  const diveM = s.lipOn ? CALIB.diveK * s.lipLen * Math.cos(aRad) * (0.5 + s.length / 100) : 0;
+  const aspect = s.height / Math.max(s.width, 1);              // 縦横比 → ロール傾向
+  const stab = 0.55 * (ballast / Math.max(totalW, 0.1)) + 0.45 * (1 - s.balance); // 重心深さの代理指標
+
+  let actionLabel;
+  if (!s.lipOn || idx < 0.05) actionLabel = 'ほぼ直進(トップ/シンペン系)';
+  else if (idx < 0.11) actionLabel = 'タイトウォブル';
+  else if (idx < 0.2) actionLabel = 'ミディアムウォブル';
+  else actionLabel = 'ワイドウォブル';
+  const rollLabel = aspect > 1.5 ? 'ロール強め' : aspect > 1.1 ? 'ウォブンロール' : 'ウォブル主体';
+  const stabLabel = stab > 0.42 ? '高(破綻しにくい)' : stab > 0.3 ? '中' : '低(暴れやすい)';
+
+  swim.freq = THREE.MathUtils.clamp(CALIB.freqK / s.length, 1, 4);
+  swim.amp = s.lipOn ? THREE.MathUtils.clamp(CALIB.ampBase + idx * CALIB.ampK, 3, CALIB.ampMax) : 2.5;
+  swim.roll = swim.amp * (aspect > 1.2 ? 0.5 : 0.25);
+
+  document.getElementById('action').innerHTML = `
+    <div><span class="k">アクション傾向</span><span class="v">${actionLabel}</span></div>
+    <div><span class="k">動きの質</span><span class="v">${rollLabel}</span></div>
+    <div><span class="k">潜行深度目安</span><span class="v">${s.lipOn ? diveM.toFixed(1) + ' m' : '表層'}</span></div>
+    <div><span class="k">姿勢安定性</span><span class="v">${stabLabel}</span></div>
+  `;
+}
+
+/* ================= STL出力(バイナリ) ================= */
+
+function exportSTL() {
+  const meshes = [bodyMesh, lipMesh].filter(Boolean);
+  let triCount = 0;
+  const sources = meshes.map(m => {
+    const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
+    triCount += g.getAttribute('position').count / 3;
+    return g;
+  });
+
+  const buf = new ArrayBuffer(84 + triCount * 50);
+  const dv = new DataView(buf);
+  dv.setUint32(80, triCount, true);
+  let off = 84;
+  const pa = new THREE.Vector3(), pb = new THREE.Vector3(), pc = new THREE.Vector3(), nrm = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+
+  for (const g of sources) {
+    const pos = g.getAttribute('position');
+    for (let i = 0; i < pos.count; i += 3) {
+      pa.fromBufferAttribute(pos, i); pb.fromBufferAttribute(pos, i + 1); pc.fromBufferAttribute(pos, i + 2);
+      nrm.copy(e1.copy(pb).sub(pa)).cross(e2.copy(pc).sub(pa)).normalize();
+      dv.setFloat32(off, nrm.x, true); dv.setFloat32(off + 4, nrm.y, true); dv.setFloat32(off + 8, nrm.z, true);
+      let o = off + 12;
+      for (const v of [pa, pb, pc]) {
+        dv.setFloat32(o, v.x, true); dv.setFloat32(o + 4, v.y, true); dv.setFloat32(o + 8, v.z, true);
+        o += 12;
+      }
+      dv.setUint16(off + 48, 0, true);
+      off += 50;
+    }
+  }
+
+  const blob = new Blob([buf], { type: 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `lure_${state.length}mm.stl`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ================= UI構築 ================= */
+
+function buildControls(defs, containerId) {
+  const el = document.getElementById(containerId);
+  for (const p of defs) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<label>${p.label}</label>
+      <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${state[p.key]}" data-key="${p.key}">
+      <span class="val" id="val-${p.key}">${state[p.key]}</span>`;
+    el.appendChild(row);
+    row.querySelector('input').addEventListener('input', e => {
+      state[p.key] = parseFloat(e.target.value);
+      document.getElementById(`val-${p.key}`).textContent = state[p.key];
+      rebuild();
+    });
+  }
+}
+buildControls(PARAM_DEFS.body, 'bodyControls');
+buildControls(PARAM_DEFS.lip, 'lipControls');
+
+document.getElementById('lipOn').addEventListener('change', e => { state.lipOn = e.target.checked; rebuild(); });
+
+renderer.localClippingEnabled = true;
+const cutPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+document.getElementById('hollowOn').addEventListener('change', e => { state.hollow = e.target.checked; rebuild(); });
+document.getElementById('cutaway').addEventListener('change', e => {
+  const planes = e.target.checked ? [cutPlane] : [];
+  bodyMat.clippingPlanes = planes;
+  lipMat.clippingPlanes = planes;
+  bodyMat.needsUpdate = true;
+  lipMat.needsUpdate = true;
+});
+document.getElementById('ballast').addEventListener('input', () => updateStats(0));
+document.querySelectorAll('input[name=water]').forEach(r => r.addEventListener('change', () => updateStats(0)));
+document.getElementById('dlBtn').addEventListener('click', exportSTL);
+document.getElementById('swimOn').addEventListener('change', e => { swimEnabled = e.target.checked; });
+
+const presetSel = document.getElementById('preset');
+for (const name of Object.keys(PRESETS)) {
+  const opt = document.createElement('option');
+  opt.value = name; opt.textContent = name;
+  presetSel.appendChild(opt);
+}
+presetSel.value = 'バス ミノー 90mm';
+presetSel.addEventListener('change', () => applyPreset(presetSel.value));
+
+function applyPreset(name) {
+  const p = PRESETS[name];
+  for (const [k, v] of Object.entries(p)) {
+    if (k === 'ballast') { document.getElementById('ballast').value = v; continue; }
+    if (k === 'lipOn') { state.lipOn = v; document.getElementById('lipOn').checked = v; continue; }
+    state[k] = v;
+    const slider = document.querySelector(`input[data-key=${k}]`);
+    if (slider) { slider.value = v; document.getElementById(`val-${k}`).textContent = v; }
+  }
+  rebuild();
+}
+
+/* ================= ループ ================= */
+
+function resize() {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(viewport);
+resize();
+
+applyPreset('バス ミノー 90mm');
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  controls.update();
+  if (swimEnabled) {
+    const ph = clock.getElapsedTime() * Math.PI * 2 * swim.freq;
+    lureGroup.rotation.y = THREE.MathUtils.degToRad(swim.amp) * Math.sin(ph);   // ノーズ支点のヨー
+    lureGroup.rotation.x = THREE.MathUtils.degToRad(swim.roll) * Math.sin(ph + Math.PI / 3); // ロール
+  } else if (lureGroup.rotation.x !== 0 || lureGroup.rotation.y !== 0) {
+    lureGroup.rotation.set(0, 0, 0);
+  }
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
