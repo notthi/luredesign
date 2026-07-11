@@ -110,6 +110,13 @@
     </div>
 
     <div class="section">
+      <h2>カップ(ポッパー)</h2>
+      <label class="check"><input type="checkbox" id="cupOn"> カップあり(口が凹む)</label>
+      <div id="cupControls"></div>
+      <div class="note">レッドヘッド等のヘッドカラーは口の中まで塗られる。深さは内部空洞と干渉しない範囲に自動制限。</div>
+    </div>
+
+    <div class="section">
       <h2>カラー</h2>
       <select id="colorPreset"></select>
       <div style="height:10px"></div>
@@ -221,22 +228,28 @@ const PARAM_DEFS = {
     { key: 'lipWidth', label: '幅 (mm)',          min: 4,  max: 24, step: 0.5, def: 9 },
     { key: 'lipAngle', label: '角度 (°)',         min: 10, max: 80, step: 1,   def: 30 },
   ],
+  cup: [
+    { key: 'cupOpen',  label: '開口の大きさ',     min: 0.3, max: 1.0, step: 0.01, def: 0.6 },
+    { key: 'cupDepth', label: '深さ (mm)',        min: 2,   max: 12,  step: 0.5,  def: 5 },
+    { key: 'cupSlant', label: '傾き (°)',         min: 0,   max: 35,  step: 1,    def: 15 },
+  ],
 };
 
 const PRESETS = {
-  'アジング ミノー 45mm':   { length: 45, height: 6.5, width: 5,  peak: 0.4,  noseFull: 1.0, tailFull: 1.4,  balance: 0.5,  section: 2.2, lipOn: true,  lipLen: 6,  lipWidth: 5,  lipAngle: 45, ballast: 0.6 },
-  'トラウト ミノー 55mm':   { length: 55, height: 9,   width: 7,  peak: 0.38, noseFull: 0.95,tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 8,  lipWidth: 7,  lipAngle: 40, ballast: 1.2 },
-  'バス ミノー 90mm':       { length: 90, height: 14,  width: 10, peak: 0.38, noseFull: 0.9, tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 12, lipWidth: 9,  lipAngle: 30, ballast: 3.0 },
-  'クランクベイト 55mm':    { length: 55, height: 20,  width: 15, peak: 0.33, noseFull: 0.55,tailFull: 1.1,  balance: 0.44, section: 2.1, lipOn: true,  lipLen: 16, lipWidth: 13, lipAngle: 55, ballast: 3.5 },
-  'ポッパー 60mm':          { length: 60, height: 13,  width: 11, peak: 0.3,  noseFull: 0.42,tailFull: 1.2,  balance: 0.42, section: 2.4, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 2.0 },
-  'ペンシルベイト 100mm':   { length: 100,height: 13,  width: 11, peak: 0.42, noseFull: 0.8, tailFull: 1.1,  balance: 0.5,  section: 2.0, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 4.5 },
-  'シーバス ミノー 125mm':  { length: 125,height: 17,  width: 12, peak: 0.4,  noseFull: 0.95,tailFull: 1.3,  balance: 0.48, section: 2.5, lipOn: true,  lipLen: 14, lipWidth: 11, lipAngle: 22, ballast: 8.0 },
+  'アジング ミノー 45mm':   { length: 45, height: 6.5, width: 5,  peak: 0.4,  noseFull: 1.0, tailFull: 1.4,  balance: 0.5,  section: 2.2, lipOn: true,  lipLen: 6,  lipWidth: 5,  lipAngle: 45, ballast: 0.6, cupOn: false },
+  'トラウト ミノー 55mm':   { length: 55, height: 9,   width: 7,  peak: 0.38, noseFull: 0.95,tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 8,  lipWidth: 7,  lipAngle: 40, ballast: 1.2, cupOn: false },
+  'バス ミノー 90mm':       { length: 90, height: 14,  width: 10, peak: 0.38, noseFull: 0.9, tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 12, lipWidth: 9,  lipAngle: 30, ballast: 3.0, cupOn: false },
+  'クランクベイト 55mm':    { length: 55, height: 20,  width: 15, peak: 0.33, noseFull: 0.55,tailFull: 1.1,  balance: 0.44, section: 2.1, lipOn: true,  lipLen: 16, lipWidth: 13, lipAngle: 55, ballast: 3.5, cupOn: false },
+  'ポッパー 60mm':          { length: 60, height: 13,  width: 11, peak: 0.3,  noseFull: 0.42,tailFull: 1.2,  balance: 0.42, section: 2.4, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 2.0, cupOn: true, cupOpen: 0.65, cupDepth: 5, cupSlant: 15 },
+  'ペンシルベイト 100mm':   { length: 100,height: 13,  width: 11, peak: 0.42, noseFull: 0.8, tailFull: 1.1,  balance: 0.5,  section: 2.0, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 4.5, cupOn: false },
+  'シーバス ミノー 125mm':  { length: 125,height: 17,  width: 12, peak: 0.4,  noseFull: 0.95,tailFull: 1.3,  balance: 0.48, section: 2.5, lipOn: true,  lipLen: 14, lipWidth: 11, lipAngle: 22, ballast: 8.0, cupOn: false },
 };
 
 const state = {};
 for (const g of Object.values(PARAM_DEFS)) for (const p of g) state[p.key] = p.def;
 state.lipOn = true;
 state.hollow = true;
+state.cupOn = false;
 
 /* ================= 材質・製造定数 ================= */
 
@@ -264,6 +277,11 @@ function profile(t, peak, expF, expR) {
   return Math.pow(Math.cos(0.5 * Math.PI * ((t - peak) / (1 - peak))), expR);
 }
 
+// カップ縁の位置(全長比)。開口スライダー(0.3〜1.0)を縁位置にマップする
+function cupRimT(s) { return 0.03 + 0.11 * s.cupOpen; }
+// カップ深さ(mm)。ノーズ側ソリッド部に収まるようクランプ
+function cupDepthMm(s) { return Math.min(s.cupDepth, (0.30 - cupRimT(s)) * s.length); }
+
 function buildBodyGeometry(s) {
   const M = 110;         // 長手方向分割
   const R = 56;          // 周方向分割
@@ -272,9 +290,18 @@ function buildBodyGeometry(s) {
   const indices = [];
   const uvs = [];
 
-  // 端の丸みを保つためコサイン分布でサンプリング
+  const cupOn = !!s.cupOn;
+  const tRim = cupOn ? cupRimT(s) : 0;
+  const cupDepth = cupOn ? cupDepthMm(s) : 0;
+  const slantTan = cupOn ? Math.tan(THREE.MathUtils.degToRad(s.cupSlant)) : 0;
+  const blendEnd = tRim + 0.10;   // スラントをボディへ馴染ませる範囲
+
+  // 端の丸みを保つためコサイン分布でサンプリング(カップ時は縁位置から開始)
   const ts = [];
-  for (let i = 0; i <= M; i++) ts.push(0.5 * (1 - Math.cos(Math.PI * i / M)));
+  for (let i = 0; i <= M; i++) {
+    const f = 0.5 * (1 - Math.cos(Math.PI * i / M));
+    ts.push(tRim + (1 - tRim) * f);
+  }
 
   const ringStart = [];
   const exp2n = 2 / s.section;
@@ -287,7 +314,6 @@ function buildBodyGeometry(s) {
     const hTop = s.height * s.balance * pc;
     const hBot = s.height * (1 - s.balance) * pc;
     const hw = (s.width / 2) * pc;
-    const x = t * L;
     ringStart.push(positions.length / 3);
     // j=R は j=0 と同一座標(UVのみ1.0)。テクスチャの継ぎ目は目立たない腹側中央に置く
     for (let j = 0; j <= R; j++) {
@@ -296,27 +322,53 @@ function buildBodyGeometry(s) {
       const z = hw * Math.sign(cu) * Math.pow(Math.abs(cu), exp2n);
       const hy = sv >= 0 ? hTop : hBot;
       const y = hy * Math.sign(sv) * Math.pow(Math.abs(sv), exp2n);
+      let x = t * L;
+      // カップの傾き: 上唇が前に出るよう前面を傾け、後方へ滑らかに馴染ませる
+      if (slantTan > 0 && t < blendEnd) {
+        x -= slantTan * y * smoothstep((blendEnd - t) / (blendEnd - tRim));
+      }
       positions.push(x, y, z);
       uvs.push(t, j / R);   // U=ノーズ→テール / V=腹→背→腹(周方向)
     }
   }
 
-  // ポール頂点(ノーズ・テール)
+  // カップ内面: 縁リングを中心軸へ縮小しつつ奥(+X)へ送ってお椀状に窪ませる
+  const cupRings = [];   // カップ底側→縁の順
+  if (cupOn) {
+    const K = 12;
+    const rimBase = ringStart[0] * 3;
+    for (let k = 1; k < K; k++) {
+      const q = k / K;   // 0=カップ底の中心, 1=縁
+      cupRings.push(positions.length / 3);
+      for (let j = 0; j <= R; j++) {
+        const rx = positions[rimBase + j * 3];
+        const ry = positions[rimBase + j * 3 + 1];
+        const rz = positions[rimBase + j * 3 + 2];
+        positions.push(rx + cupDepth * (1 - q * q), ry * q, rz * q);
+        uvs.push(tRim * q, j / R);
+      }
+    }
+  }
+
+  // リング列: カップ底側→縁→ボディ→テール の一続きの面として繋ぐ
+  const rings = [...cupRings, ...ringStart];
+
+  // ポール頂点(前端=カップ底 or ノーズ、後端=テール)
   const noseIdx = positions.length / 3;
-  positions.push(0, 0, 0); uvs.push(0, 0.5);
+  positions.push(cupOn ? tRim * L + cupDepth : 0, 0, 0); uvs.push(0, 0.5);
   const tailIdx = positions.length / 3;
   positions.push(L, 0, 0); uvs.push(1, 0.5);
 
   // 側面
-  for (let i = 0; i < M; i++) {
-    const a = ringStart[i], b = ringStart[i + 1];
+  for (let i = 0; i < rings.length - 1; i++) {
+    const a = rings[i], b = rings[i + 1];
     for (let j = 0; j < R; j++) {
       indices.push(a + j, b + j, b + j + 1);
       indices.push(a + j, b + j + 1, a + j + 1);
     }
   }
   // キャップ
-  const first = ringStart[0], last = ringStart[M];
+  const first = rings[0], last = rings[rings.length - 1];
   for (let j = 0; j < R; j++) {
     indices.push(noseIdx, first + j + 1, first + j);
     indices.push(tailIdx, last + j, last + j + 1);
@@ -330,8 +382,8 @@ function buildBodyGeometry(s) {
   geo.computeVertexNormals();
   // 継ぎ目(j=0とj=R)は頂点が分かれるため、法線を平均してシェーディングの筋を消す
   const nrm = geo.getAttribute('normal');
-  for (let i = 0; i <= M; i++) {
-    const a = ringStart[i], b = a + R;
+  for (const start of rings) {
+    const a = start, b = a + R;
     const nx = nrm.getX(a) + nrm.getX(b), ny = nrm.getY(a) + nrm.getY(b), nz = nrm.getZ(a) + nrm.getZ(b);
     const l = Math.hypot(nx, ny, nz) || 1;
     nrm.setXYZ(a, nx / l, ny / l, nz / l);
@@ -435,7 +487,9 @@ function buildLipGeometry(s) {
 function buildCavityGeometry(s) {
   const wall = WALL_MM;
   if (s.height * s.balance - wall < 0.8 || s.width / 2 - wall < 0.6) return null; // 小型は中空化しない
-  const t0 = 0.14, t1 = 0.86;   // ノーズ・テールはソリッドで残す(ヒートン用)
+  // ノーズ・テールはソリッドで残す(ヒートン用)。カップ時はカップ底+壁厚の後ろから
+  const t0 = Math.min(s.cupOn ? Math.max(0.14, cupRimT(s) + (cupDepthMm(s) + wall) / s.length) : 0.14, 0.4);
+  const t1 = 0.86;
   const M = 72, R = 40;
   const positions = [], indices = [];
   const exp2n = 2 / s.section;
@@ -786,7 +840,8 @@ function updateAction(totalW, ballast) {
   const stab = 0.55 * (ballast / Math.max(totalW, 0.1)) + 0.45 * (1 - s.balance); // 重心深さの代理指標
 
   let actionLabel;
-  if (!s.lipOn || idx < 0.05) actionLabel = 'ほぼ直進(トップ/シンペン系)';
+  if (s.cupOn && !s.lipOn) actionLabel = 'ポッパー(水面で音・飛沫)';
+  else if (!s.lipOn || idx < 0.05) actionLabel = 'ほぼ直進(トップ/シンペン系)';
   else if (idx < 0.11) actionLabel = 'タイトウォブル';
   else if (idx < 0.2) actionLabel = 'ミディアムウォブル';
   else actionLabel = 'ワイドウォブル';
@@ -867,8 +922,10 @@ function buildControls(defs, containerId) {
 }
 buildControls(PARAM_DEFS.body, 'bodyControls');
 buildControls(PARAM_DEFS.lip, 'lipControls');
+buildControls(PARAM_DEFS.cup, 'cupControls');
 
 document.getElementById('lipOn').addEventListener('change', e => { state.lipOn = e.target.checked; rebuild(); });
+document.getElementById('cupOn').addEventListener('change', e => { state.cupOn = e.target.checked; rebuild(); });
 
 /* ---- カラーUI ---- */
 const PAINT_INPUTS = [
@@ -984,6 +1041,8 @@ async function refreshDesignList() {
 
 // 保存済みデザインを形状・カラーUIへ反映
 function applyDesign(params, paintJson) {
+  // カップ実装前の保存データにはcupOnが無いので明示的にオフへ戻す
+  if (!('cupOn' in params)) { state.cupOn = false; $('cupOn').checked = false; }
   for (const [k, v] of Object.entries(params)) {
     if (k === 'ballast') { $('ballast').value = v; continue; }
     if (k === 'water') {
@@ -992,6 +1051,7 @@ function applyDesign(params, paintJson) {
       continue;
     }
     if (k === 'lipOn') { state.lipOn = v; $('lipOn').checked = v; continue; }
+    if (k === 'cupOn') { state.cupOn = v; $('cupOn').checked = v; continue; }
     if (k === 'hollow') { state.hollow = v; $('hollowOn').checked = v; continue; }
     if (k in state) {
       state[k] = v;
@@ -1061,6 +1121,7 @@ function applyPreset(name) {
   for (const [k, v] of Object.entries(p)) {
     if (k === 'ballast') { document.getElementById('ballast').value = v; continue; }
     if (k === 'lipOn') { state.lipOn = v; document.getElementById('lipOn').checked = v; continue; }
+    if (k === 'cupOn') { state.cupOn = v; document.getElementById('cupOn').checked = v; continue; }
     state[k] = v;
     const slider = document.querySelector(`input[data-key=${k}]`);
     if (slider) { slider.value = v; document.getElementById(`val-${k}`).textContent = v; }
