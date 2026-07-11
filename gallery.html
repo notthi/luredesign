@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>lureworld ギャラリー</title>
+<style>
+  :root {
+    --bg: #10151c; --panel: #1a222d; --panel2: #232e3c;
+    --text: #e8edf2; --sub: #8fa0b3; --accent: #35b6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #2c3948; }
+  h1 { font-size: 16px; }
+  .sub { color: var(--sub); font-size: 11px; margin-top: 2px; }
+  header a { color: var(--accent); text-decoration: none; font-size: 13px; background: var(--panel2); border: 1px solid #3d4d61; padding: 8px 14px; border-radius: 8px; white-space: nowrap; }
+  header a:hover { filter: brightness(1.15); }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; padding: 20px; max-width: 1200px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid #2c3948; border-radius: 10px; overflow: hidden; cursor: pointer; transition: transform .12s, border-color .12s; display: block; color: inherit; text-decoration: none; }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .card img, .card .noimg { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #0c1117; }
+  .card .noimg { display: flex; align-items: center; justify-content: center; color: var(--sub); font-size: 30px; }
+  .meta { padding: 10px 12px; }
+  .name { font-size: 13px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .by { font-size: 11px; color: var(--sub); margin-top: 3px; }
+  .remix { font-size: 10.5px; color: var(--accent); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status { text-align: center; color: var(--sub); padding: 48px 20px; font-size: 13px; grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🎣 lureworld ギャラリー</h1>
+    <div class="sub">みんなの公開デザイン。開いてリミックスできる</div>
+  </div>
+  <a href="index.html">＋ デザインを作る</a>
+</header>
+<div id="grid"><div id="status">読み込み中…</div></div>
+
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const SUPABASE_URL = 'https://guvobgzpchkohpboqqko.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1dm9iZ3pwY2hrb2hwYm9xcWtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3OTM4OTMsImV4cCI6MjA5OTM2OTg5M30.1yHRIaX6pLCHRxyghrbOcZIEvhBGvRtflVHbS5H0QuI';
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const grid = document.getElementById('grid');
+const status = document.getElementById('status');
+
+const { data, error } = await supabase
+  .from('designs')
+  .select('id,name,thumb,updated_at,profiles(display_name),remix:remix_of(name)')
+  .eq('is_public', true)
+  .order('updated_at', { ascending: false })
+  .limit(60);
+
+if (error) {
+  status.textContent = `読み込みに失敗した: ${error.message}`;
+} else if (!data.length) {
+  status.textContent = 'まだ公開デザインがない。最初の1匹を投稿しよう!';
+} else {
+  status.remove();
+  for (const d of data) {
+    // ユーザー投稿データはinnerHTMLに入れず、DOM APIとtextContentで組み立てる(XSS対策)
+    const card = document.createElement('a');
+    card.className = 'card';
+    card.href = `index.html?design=${encodeURIComponent(d.id)}`;
+
+    if (typeof d.thumb === 'string' && d.thumb.startsWith('data:image/')) {
+      const img = document.createElement('img');
+      img.src = d.thumb;
+      img.alt = '';
+      card.appendChild(img);
+    } else {
+      const ph = document.createElement('div');
+      ph.className = 'noimg';
+      ph.textContent = '🎣';
+      card.appendChild(ph);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = d.name;
+    const by = document.createElement('div');
+    by.className = 'by';
+    by.textContent = `by ${d.profiles?.display_name ?? 'angler'} ・ ${new Date(d.updated_at).toLocaleDateString('ja-JP')}`;
+    meta.append(name, by);
+    if (d.remix?.name) {
+      const rm = document.createElement('div');
+      rm.className = 'remix';
+      rm.textContent = `↻ リミックス元: ${d.remix.name}`;
+      meta.appendChild(rm);
+    }
+    card.appendChild(meta);
+    grid.appendChild(card);
+  }
+}
+</script>
+</body>
+</html>

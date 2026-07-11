@@ -182,6 +182,7 @@
           <button id="logoutBtn">ログアウト</button>
         </div>
         <div class="row"><label>デザイン名</label><input type="text" id="designName" placeholder="無題のルアー" maxlength="60"></div>
+        <label class="check"><input type="checkbox" id="isPublic"> ギャラリーに公開する</label>
         <div class="row">
           <button id="saveBtn" style="flex:1;background:var(--accent);color:#06283c;font-weight:bold;border:none">💾 保存</button>
           <button id="newBtn">新規</button>
@@ -192,7 +193,9 @@
           <button id="deleteBtn">削除</button>
         </div>
       </div>
+      <div class="note" id="remixNote" style="display:none;color:var(--accent)"></div>
       <div class="note" id="cloudNote"></div>
+      <a href="gallery.html" style="display:block;text-align:center;margin-top:10px;padding:8px;background:var(--panel);border:1px solid #3d4d61;border-radius:6px;color:var(--accent);font-size:12px;text-decoration:none">🌏 公開ギャラリーを見る</a>
     </div>
 
     <div class="section">
@@ -971,6 +974,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const $ = id => document.getElementById(id);
 let supabase = null, session = null, currentDesignId = null;
+let remixSourceId = null;    // リミックス元(次の保存でremix_ofに記録)
+let loadedFromUrl = null;    // ?design=<id> で開いたデザイン(所有判定はセッション確立後)
 
 function cloudMsg(text) {
   $('cloudNote').textContent = text;
@@ -988,7 +993,9 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
     } else {
       currentDesignId = null;
     }
+    resolveUrlDesignOwnership();
   });
+  loadFromUrl();
 } else {
   $('loginBtn').disabled = true;
   cloudMsg('Supabase未設定のため保存機能は無効。supabase/SETUP.md の手順でURLとanonキーを設定する。');
@@ -1010,22 +1017,47 @@ function collectDesign() {
   };
 }
 
+// 現在のビューをギャラリー用サムネイル(JPEG dataURL)に縮小キャプチャ
+function captureThumb() {
+  try {
+    renderer.render(scene, camera);   // preserveDrawingBuffer無しでも同一タスク内なら読める
+    const src = renderer.domElement;
+    const c = document.createElement('canvas');
+    c.width = 320; c.height = 200;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#10151c';
+    ctx.fillRect(0, 0, c.width, c.height);
+    const sc = Math.max(c.width / src.width, c.height / src.height);
+    const w = src.width * sc, h = src.height * sc;
+    ctx.drawImage(src, (c.width - w) / 2, (c.height - h) / 2, w, h);
+    return c.toDataURL('image/jpeg', 0.7);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function saveDesign() {
   const d = collectDesign();
+  d.is_public = $('isPublic').checked;
+  const thumb = captureThumb();
+  if (thumb) d.thumb = thumb;
+  if (!currentDesignId && remixSourceId) d.remix_of = remixSourceId;
   const q = currentDesignId
     ? supabase.from('designs').update(d).eq('id', currentDesignId)
     : supabase.from('designs').insert(d);
   const { data, error } = await q.select('id').single();
   if (error) { cloudMsg(`保存に失敗: ${error.message}`); return; }
   currentDesignId = data.id;
+  remixSourceId = null;
+  $('remixNote').style.display = 'none';
   $('designName').value = d.name;
-  cloudMsg(`「${d.name}」を保存した`);
+  cloudMsg(`「${d.name}」を保存した${d.is_public ? '(ギャラリーに公開中)' : ''}`);
   refreshDesignList();
 }
 
 async function refreshDesignList() {
   const { data, error } = await supabase
-    .from('designs').select('id,name,updated_at')
+    .from('designs').select('id,name,updated_at,is_public')
     .eq('user_id', session.user.id)
     .order('updated_at', { ascending: false });
   if (error) { cloudMsg(`一覧の取得に失敗: ${error.message}`); return; }
@@ -1034,8 +1066,41 @@ async function refreshDesignList() {
   for (const d of data) {
     const opt = document.createElement('option');
     opt.value = d.id;
-    opt.textContent = `${d.name}  (${new Date(d.updated_at).toLocaleDateString('ja-JP')})`;
+    opt.textContent = `${d.is_public ? '🌏 ' : ''}${d.name}  (${new Date(d.updated_at).toLocaleDateString('ja-JP')})`;
     sel.appendChild(opt);
+  }
+}
+
+// ?design=<id> でギャラリーからデザインを開く(公開デザインは未ログインでも閲覧可)
+async function loadFromUrl() {
+  const id = new URLSearchParams(location.search).get('design');
+  if (!id) return;
+  const { data, error } = await supabase
+    .from('designs').select('*, profiles(display_name)').eq('id', id).single();
+  if (error) { cloudMsg(`URLのデザインを読み込めなかった: ${error.message}`); return; }
+  loadedFromUrl = data;
+  $('designName').value = data.name;
+  applyDesign(data.params_json, data.paint_json);
+  resolveUrlDesignOwnership();
+}
+
+// 自分のデザインなら編集モード、他人の公開デザインならリミックスモード
+function resolveUrlDesignOwnership() {
+  if (!loadedFromUrl) return;
+  const d = loadedFromUrl;
+  if (session && d.user_id === session.user.id) {
+    currentDesignId = d.id;
+    remixSourceId = null;
+    $('isPublic').checked = !!d.is_public;
+    $('remixNote').style.display = 'none';
+    cloudMsg(`「${d.name}」を編集中`);
+  } else {
+    currentDesignId = null;
+    remixSourceId = d.id;
+    const author = d.profiles?.display_name || 'angler';
+    const rn = $('remixNote');
+    rn.style.display = '';
+    rn.textContent = `↻ リミックス元: 「${d.name}」 by ${author} — 保存すると自分のデザインとしてコピーされる`;
   }
 }
 
@@ -1068,7 +1133,11 @@ function applyDesign(params, paintJson) {
 $('saveBtn').addEventListener('click', saveDesign);
 $('newBtn').addEventListener('click', () => {
   currentDesignId = null;
+  remixSourceId = null;
+  loadedFromUrl = null;
   $('designName').value = '';
+  $('isPublic').checked = false;
+  $('remixNote').style.display = 'none';
   cloudMsg('新規デザイン(次の保存で新しい行になる)');
 });
 $('loadBtn').addEventListener('click', async () => {
@@ -1077,7 +1146,11 @@ $('loadBtn').addEventListener('click', async () => {
   const { data, error } = await supabase.from('designs').select('*').eq('id', id).single();
   if (error) { cloudMsg(`読み込みに失敗: ${error.message}`); return; }
   currentDesignId = data.id;
+  remixSourceId = null;
+  loadedFromUrl = null;
   $('designName').value = data.name;
+  $('isPublic').checked = !!data.is_public;
+  $('remixNote').style.display = 'none';
   applyDesign(data.params_json, data.paint_json);
   cloudMsg(`「${data.name}」を開いた`);
 });
