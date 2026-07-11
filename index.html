@@ -787,7 +787,11 @@ function addDressing(s) {
     const ring = new THREE.Mesh(ringGeo, wireMat);
     let x = sp.t * s.length, y;
     if (sp.dy < 0) y = -s.height * (1 - s.balance) * p - 1.2;
-    else if (sp.t < 0.01) { y = 0; x = -1.2; }
+    else if (sp.t < 0.01) {
+      // ラインアイ: 通常はノーズ先端、カップ時はカップ底の中央から前へ出す
+      y = 0;
+      x = s.cupOn ? cupRimT(s) * s.length + cupDepthMm(s) - 1.2 : -1.2;
+    }
     else { x = s.length + 1.2; y = 0; }
     ring.position.set(x, y, 0);
     lureGroup.add(ring);
