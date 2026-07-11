@@ -43,6 +43,13 @@
     flex: 1; min-width: 0; height: 26px; padding: 1px 2px;
     background: #2c3948; border: 1px solid #3d4d61; border-radius: 6px; cursor: pointer;
   }
+  .row input[type=text] {
+    flex: 1; min-width: 0; background: #2c3948; color: var(--text);
+    border: 1px solid #3d4d61; border-radius: 6px; padding: 6px 8px; font-size: 13px;
+  }
+  #designList { width: 100%; background: #2c3948; color: var(--text); border: 1px solid #3d4d61; border-radius: 6px; font-size: 12px; }
+  #designList option { padding: 4px 6px; }
+  button:disabled { opacity: 0.45; cursor: default; }
   .check { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 8px; cursor: pointer; }
   .check input { accent-color: var(--accent); }
   #stats, #action { font-size: 12px; line-height: 1.9; }
@@ -73,7 +80,8 @@
 {
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
   }
 }
 </script>
@@ -157,6 +165,30 @@
     </div>
 
     <div class="section">
+      <h2>アカウント・保存</h2>
+      <div id="authBox">
+        <button id="loginBtn" style="width:100%">Google でログイン</button>
+      </div>
+      <div id="userBox" style="display:none">
+        <div class="row" style="justify-content:space-between">
+          <span id="userName" style="font-size:12px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          <button id="logoutBtn">ログアウト</button>
+        </div>
+        <div class="row"><label>デザイン名</label><input type="text" id="designName" placeholder="無題のルアー" maxlength="60"></div>
+        <div class="row">
+          <button id="saveBtn" style="flex:1;background:var(--accent);color:#06283c;font-weight:bold;border:none">💾 保存</button>
+          <button id="newBtn">新規</button>
+        </div>
+        <select id="designList" size="5"></select>
+        <div class="row" style="margin-top:6px">
+          <button id="loadBtn" style="flex:1">開く</button>
+          <button id="deleteBtn">削除</button>
+        </div>
+      </div>
+      <div class="note" id="cloudNote"></div>
+    </div>
+
+    <div class="section">
       <h2>出力</h2>
       <button id="dlBtn">⬇ STLダウンロード</button>
       <div id="sizeGuard"></div>
@@ -169,6 +201,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createClient } from '@supabase/supabase-js';
 
 /* ================= パラメータ定義 ================= */
 
@@ -873,6 +906,131 @@ colorSel.addEventListener('change', () => {
   renderPaint();
 });
 syncPaintUI();
+
+/* ================= クラウド保存(Supabase) ================= */
+// 設定手順は supabase/SETUP.md を参照。anonキーはRLS前提の公開可能キー
+const SUPABASE_URL = 'https://guvobgzpchkohpboqqko.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1dm9iZ3pwY2hrb2hwYm9xcWtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3OTM4OTMsImV4cCI6MjA5OTM2OTg5M30.1yHRIaX6pLCHRxyghrbOcZIEvhBGvRtflVHbS5H0QuI';   // anon public(RLS前提の公開可能キー)
+
+const $ = id => document.getElementById(id);
+let supabase = null, session = null, currentDesignId = null;
+
+function cloudMsg(text) {
+  $('cloudNote').textContent = text;
+}
+
+if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  supabase.auth.onAuthStateChange((_ev, s) => {
+    session = s;
+    $('authBox').style.display = s ? 'none' : '';
+    $('userBox').style.display = s ? '' : 'none';
+    if (s) {
+      $('userName').textContent = s.user.user_metadata?.name || s.user.email;
+      refreshDesignList();
+    } else {
+      currentDesignId = null;
+    }
+  });
+} else {
+  $('loginBtn').disabled = true;
+  cloudMsg('Supabase未設定のため保存機能は無効。supabase/SETUP.md の手順でURLとanonキーを設定する。');
+}
+
+$('loginBtn').addEventListener('click', () =>
+  supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } }));
+$('logoutBtn').addEventListener('click', () => supabase.auth.signOut());
+
+function collectDesign() {
+  return {
+    name: $('designName').value.trim() || '無題のルアー',
+    params_json: {
+      ...state,
+      ballast: parseFloat($('ballast').value) || 0,
+      water: document.querySelector('input[name=water]:checked').value,
+    },
+    paint_json: { ...paint },
+  };
+}
+
+async function saveDesign() {
+  const d = collectDesign();
+  const q = currentDesignId
+    ? supabase.from('designs').update(d).eq('id', currentDesignId)
+    : supabase.from('designs').insert(d);
+  const { data, error } = await q.select('id').single();
+  if (error) { cloudMsg(`保存に失敗: ${error.message}`); return; }
+  currentDesignId = data.id;
+  $('designName').value = d.name;
+  cloudMsg(`「${d.name}」を保存した`);
+  refreshDesignList();
+}
+
+async function refreshDesignList() {
+  const { data, error } = await supabase
+    .from('designs').select('id,name,updated_at')
+    .eq('user_id', session.user.id)
+    .order('updated_at', { ascending: false });
+  if (error) { cloudMsg(`一覧の取得に失敗: ${error.message}`); return; }
+  const sel = $('designList');
+  sel.innerHTML = '';
+  for (const d of data) {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = `${d.name}  (${new Date(d.updated_at).toLocaleDateString('ja-JP')})`;
+    sel.appendChild(opt);
+  }
+}
+
+// 保存済みデザインを形状・カラーUIへ反映
+function applyDesign(params, paintJson) {
+  for (const [k, v] of Object.entries(params)) {
+    if (k === 'ballast') { $('ballast').value = v; continue; }
+    if (k === 'water') {
+      const r = document.querySelector(`input[name=water][value="${v}"]`);
+      if (r) r.checked = true;
+      continue;
+    }
+    if (k === 'lipOn') { state.lipOn = v; $('lipOn').checked = v; continue; }
+    if (k === 'hollow') { state.hollow = v; $('hollowOn').checked = v; continue; }
+    if (k in state) {
+      state[k] = v;
+      const slider = document.querySelector(`input[data-key=${k}]`);
+      if (slider) { slider.value = v; $(`val-${k}`).textContent = v; }
+    }
+  }
+  Object.assign(paint, paintJson);
+  syncPaintUI();
+  renderPaint();
+  rebuild();
+}
+
+$('saveBtn').addEventListener('click', saveDesign);
+$('newBtn').addEventListener('click', () => {
+  currentDesignId = null;
+  $('designName').value = '';
+  cloudMsg('新規デザイン(次の保存で新しい行になる)');
+});
+$('loadBtn').addEventListener('click', async () => {
+  const id = $('designList').value;
+  if (!id) return;
+  const { data, error } = await supabase.from('designs').select('*').eq('id', id).single();
+  if (error) { cloudMsg(`読み込みに失敗: ${error.message}`); return; }
+  currentDesignId = data.id;
+  $('designName').value = data.name;
+  applyDesign(data.params_json, data.paint_json);
+  cloudMsg(`「${data.name}」を開いた`);
+});
+$('deleteBtn').addEventListener('click', async () => {
+  const id = $('designList').value;
+  if (!id) return;
+  const name = $('designList').selectedOptions[0]?.textContent || '';
+  if (!confirm(`${name} を削除する？`)) return;
+  const { error } = await supabase.from('designs').delete().eq('id', id);
+  if (error) { cloudMsg(`削除に失敗: ${error.message}`); return; }
+  if (currentDesignId === id) currentDesignId = null;
+  refreshDesignList();
+});
 
 renderer.localClippingEnabled = true;
 const cutPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
