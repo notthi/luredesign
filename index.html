@@ -39,6 +39,10 @@
   }
   select { width: 100%; }
   .row input[type=number] { width: 70px; }
+  .row input[type=color] {
+    flex: 1; min-width: 0; height: 26px; padding: 1px 2px;
+    background: #2c3948; border: 1px solid #3d4d61; border-radius: 6px; cursor: pointer;
+  }
   .check { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 8px; cursor: pointer; }
   .check input { accent-color: var(--accent); }
   #stats, #action { font-size: 12px; line-height: 1.9; }
@@ -95,6 +99,32 @@
       <h2>リップ</h2>
       <label class="check"><input type="checkbox" id="lipOn" checked> リップあり</label>
       <div id="lipControls"></div>
+    </div>
+
+    <div class="section">
+      <h2>カラー</h2>
+      <select id="colorPreset"></select>
+      <div style="height:10px"></div>
+      <div class="row"><label>ベース(腹)色</label><input type="color" id="cBase"></div>
+      <label class="check"><input type="checkbox" id="cBackOn"> 背中の色を塗る</label>
+      <div class="row"><label>背中色</label><input type="color" id="cBack"></div>
+      <div class="row"><label>背中の広さ</label><input type="range" id="cBackW" min="0.1" max="0.6" step="0.01"><span class="val" id="val-cBackW"></span></div>
+      <div class="row"><label>ぼかし</label><input type="range" id="cBlend" min="0" max="0.4" step="0.01"><span class="val" id="val-cBlend"></span></div>
+      <label class="check"><input type="checkbox" id="cHeadOn"> ヘッドカラー</label>
+      <div class="row"><label>ヘッド色</label><input type="color" id="cHead"></div>
+      <div class="row"><label>ヘッド長さ</label><input type="range" id="cHeadLen" min="0.08" max="0.5" step="0.01"><span class="val" id="val-cHeadLen"></span></div>
+      <div class="row"><label>模様</label>
+        <select id="cPattern" style="flex:1;width:auto">
+          <option value="none">なし</option>
+          <option value="scale">ウロコ</option>
+          <option value="dot">ドット</option>
+          <option value="stripe">タイガー縞</option>
+        </select>
+      </div>
+      <div class="row"><label>模様の色</label><input type="color" id="cPatColor"></div>
+      <div class="row"><label>模様の濃さ</label><input type="range" id="cPatAlpha" min="0.05" max="1" step="0.01"><span class="val" id="val-cPatAlpha"></span></div>
+      <div class="row"><label>目玉の色</label><input type="color" id="cEye"></div>
+      <div class="note">UV展開した2Dテンプレートにレイヤー描画し、3Dへリアルタイム反映。塗り設定はJSONとして保存可能(SPEC 3.3 / paint_json)。</div>
     </div>
 
     <div class="section">
@@ -207,6 +237,7 @@ function buildBodyGeometry(s) {
   const L = s.length;
   const positions = [];
   const indices = [];
+  const uvs = [];
 
   // 端の丸みを保つためコサイン分布でサンプリング
   const ts = [];
@@ -225,44 +256,55 @@ function buildBodyGeometry(s) {
     const hw = (s.width / 2) * pc;
     const x = t * L;
     ringStart.push(positions.length / 3);
-    for (let j = 0; j < R; j++) {
-      const th = (j / R) * Math.PI * 2;
+    // j=R は j=0 と同一座標(UVのみ1.0)。テクスチャの継ぎ目は目立たない腹側中央に置く
+    for (let j = 0; j <= R; j++) {
+      const th = -Math.PI / 2 + ((j % R) / R) * Math.PI * 2;
       const cu = Math.cos(th), sv = Math.sin(th);
       const z = hw * Math.sign(cu) * Math.pow(Math.abs(cu), exp2n);
       const hy = sv >= 0 ? hTop : hBot;
       const y = hy * Math.sign(sv) * Math.pow(Math.abs(sv), exp2n);
       positions.push(x, y, z);
+      uvs.push(t, j / R);   // U=ノーズ→テール / V=腹→背→腹(周方向)
     }
   }
 
   // ポール頂点(ノーズ・テール)
   const noseIdx = positions.length / 3;
-  positions.push(0, 0, 0);
+  positions.push(0, 0, 0); uvs.push(0, 0.5);
   const tailIdx = positions.length / 3;
-  positions.push(L, 0, 0);
+  positions.push(L, 0, 0); uvs.push(1, 0.5);
 
   // 側面
   for (let i = 0; i < M; i++) {
     const a = ringStart[i], b = ringStart[i + 1];
     for (let j = 0; j < R; j++) {
-      const j2 = (j + 1) % R;
-      indices.push(a + j, b + j, b + j2);
-      indices.push(a + j, b + j2, a + j2);
+      indices.push(a + j, b + j, b + j + 1);
+      indices.push(a + j, b + j + 1, a + j + 1);
     }
   }
   // キャップ
   const first = ringStart[0], last = ringStart[M];
   for (let j = 0; j < R; j++) {
-    const j2 = (j + 1) % R;
-    indices.push(noseIdx, first + j2, first + j);
-    indices.push(tailIdx, last + j, last + j2);
+    indices.push(noseIdx, first + j + 1, first + j);
+    indices.push(tailIdx, last + j, last + j + 1);
   }
 
   orientOutward(positions, indices);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
+  // 継ぎ目(j=0とj=R)は頂点が分かれるため、法線を平均してシェーディングの筋を消す
+  const nrm = geo.getAttribute('normal');
+  for (let i = 0; i <= M; i++) {
+    const a = ringStart[i], b = a + R;
+    const nx = nrm.getX(a) + nrm.getX(b), ny = nrm.getY(a) + nrm.getY(b), nz = nrm.getZ(a) + nrm.getZ(b);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nrm.setXYZ(a, nx / l, ny / l, nz / l);
+    nrm.setXYZ(b, nx / l, ny / l, nz / l);
+  }
+  nrm.needsUpdate = true;
   return geo;
 }
 
@@ -403,6 +445,10 @@ function buildCavityGeometry(s) {
   orientOutward(positions, indices, true);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  // ボディとmergeGeometriesするため属性を揃える。内壁は腹側ベース色の座標(0.5, 0)を指す
+  const cavityUv = new Float32Array((positions.length / 3) * 2);
+  for (let i = 0; i < cavityUv.length; i += 2) cavityUv[i] = 0.5;
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(cavityUv, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
   return geo;
@@ -455,10 +501,125 @@ const grid = new THREE.GridHelper(300, 30, 0x2c3948, 0x1e2835);
 grid.position.y = -40;
 scene.add(grid);
 
-const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0xdde6ee, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.25, side: THREE.DoubleSide });
+const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.25, side: THREE.DoubleSide });
 const lipMat = new THREE.MeshPhysicalMaterial({ color: 0x9fd8ff, roughness: 0.15, transmission: 0.55, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
-const eyeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 });
+const eyeMat = new THREE.MeshStandardMaterial({ color: 0xdfe6ec, roughness: 0.2 });
+const pupilMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.15 });
 const wireMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.3 });
+
+/* ================= ペイント(UVテンプレート → CanvasTexture) ================= */
+
+// paint はそのまま保存可能なレイヤー定義(将来の paint_json)。描画はすべてここから再現する
+const paint = {
+  base: '#e9eef3',                                  // ベース(腹)色
+  backOn: true, back: '#28518f',                    // 背中色
+  backW: 0.30, blend: 0.22,                         // 背中の広さ(周方向比)・ぼかし
+  headOn: false, head: '#d5121e', headLen: 0.24,    // ヘッドカラー(全長比)
+  pattern: 'scale', patColor: '#7c93ad', patAlpha: 0.30,
+  eye: '#dfe6ec',
+};
+
+const COLOR_PRESETS = {
+  'イワシ':           { base: '#e9eef3', backOn: true, back: '#28518f', backW: 0.30, blend: 0.22, headOn: false, pattern: 'scale', patColor: '#7c93ad', patAlpha: 0.30, eye: '#dfe6ec' },
+  'レッドヘッド':     { base: '#f4f6f8', backOn: false, headOn: true, head: '#d5121e', headLen: 0.24, pattern: 'none', eye: '#f5c518' },
+  'チャートバック':   { base: '#f2f4ea', backOn: true, back: '#c9e819', backW: 0.34, blend: 0.16, headOn: false, pattern: 'none', eye: '#f5c518' },
+  'アユ':             { base: '#eef0e2', backOn: true, back: '#7d8f52', backW: 0.32, blend: 0.26, headOn: false, pattern: 'scale', patColor: '#95a36e', patAlpha: 0.25, eye: '#f0d431' },
+  'ワカサギ':         { base: '#edf0f4', backOn: true, back: '#65788e', backW: 0.28, blend: 0.24, headOn: false, pattern: 'dot', patColor: '#4a5a6e', patAlpha: 0.20, eye: '#e8c93e' },
+  'ファイヤータイガー': { base: '#ffcf33', backOn: true, back: '#2f9e2f', backW: 0.34, blend: 0.20, headOn: false, pattern: 'stripe', patColor: '#1d3d14', patAlpha: 0.60, eye: '#ff5a1f' },
+  'ブラック金':       { base: '#d9b34a', backOn: true, back: '#211f1a', backW: 0.30, blend: 0.18, headOn: false, pattern: 'scale', patColor: '#8a6f2a', patAlpha: 0.35, eye: '#f5c518' },
+  'パールホワイト':   { base: '#f3f5f7', backOn: false, headOn: false, pattern: 'none', eye: '#111111' },
+};
+
+const paintCanvas = document.createElement('canvas');
+paintCanvas.width = 1024; paintCanvas.height = 512;
+const pctx = paintCanvas.getContext('2d');
+const patCanvas = document.createElement('canvas');   // 模様の下描き+腹側フェード用
+patCanvas.width = 1024; patCanvas.height = 512;
+const patCtx = patCanvas.getContext('2d');
+
+const paintTex = new THREE.CanvasTexture(paintCanvas);
+paintTex.colorSpace = THREE.SRGBColorSpace;
+paintTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+bodyMat.map = paintTex;
+
+function hexA(hex, a) {
+  return `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
+}
+
+function drawPattern(type, color) {
+  const w = patCanvas.width, h = patCanvas.height;
+  patCtx.clearRect(0, 0, w, h);
+  patCtx.strokeStyle = color;
+  patCtx.fillStyle = color;
+  if (type === 'scale') {
+    const r = 15, dx = r * 1.15, dy = r * 1.75;
+    patCtx.lineWidth = 2.5;
+    for (let x = 0, col = 0; x < w + r; x += dx, col++) {
+      for (let y = (col % 2 ? dy / 2 : 0); y < h + r; y += dy) {
+        patCtx.beginPath();
+        patCtx.arc(x, y, r, -Math.PI * 0.42, Math.PI * 0.42);   // テール向きの弧
+        patCtx.stroke();
+      }
+    }
+  } else if (type === 'dot') {
+    const r = 7, dx = 56, dy = 38;
+    for (let y = 0, row = 0; y < h + r; y += dy, row++) {
+      for (let x = (row % 2 ? dx / 2 : 0); x < w + r; x += dx) {
+        patCtx.beginPath();
+        patCtx.arc(x, y, r, 0, Math.PI * 2);
+        patCtx.fill();
+      }
+    }
+  } else if (type === 'stripe') {
+    const bw = w * 0.024;
+    for (let x = w * 0.14; x < w * 0.96; x += w * 0.082) patCtx.fillRect(x - bw / 2, 0, bw, h);
+  }
+  // 腹側(キャンバス上下端)へ向かってフェードアウト
+  patCtx.globalCompositeOperation = 'destination-in';
+  const mg = patCtx.createLinearGradient(0, 0, 0, h);
+  mg.addColorStop(0, 'rgba(0,0,0,0)');
+  mg.addColorStop(0.2, 'rgba(0,0,0,1)');
+  mg.addColorStop(0.8, 'rgba(0,0,0,1)');
+  mg.addColorStop(1, 'rgba(0,0,0,0)');
+  patCtx.fillStyle = mg;
+  patCtx.fillRect(0, 0, w, h);
+  patCtx.globalCompositeOperation = 'source-over';
+}
+
+function renderPaint() {
+  const w = paintCanvas.width, h = paintCanvas.height;
+  pctx.fillStyle = paint.base;
+  pctx.fillRect(0, 0, w, h);
+
+  if (paint.backOn) {
+    // V=0.5(キャンバス中央)が背中。中央の帯をぼかしで腹色へ溶かす
+    const half = paint.backW / 2, bl = Math.max(paint.blend, 0.001);
+    const c01 = v => Math.min(Math.max(v, 0), 1);
+    const g = pctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(c01(0.5 - half - bl), hexA(paint.back, 0));
+    g.addColorStop(c01(0.5 - half), paint.back);
+    g.addColorStop(c01(0.5 + half), paint.back);
+    g.addColorStop(c01(0.5 + half + bl), hexA(paint.back, 0));
+    pctx.fillStyle = g;
+    pctx.fillRect(0, 0, w, h);
+  }
+
+  if (paint.pattern !== 'none') {
+    drawPattern(paint.pattern, paint.patColor);
+    pctx.globalAlpha = paint.patAlpha;
+    pctx.drawImage(patCanvas, 0, 0);
+    pctx.globalAlpha = 1;
+  }
+
+  if (paint.headOn) {
+    pctx.fillStyle = paint.head;
+    pctx.fillRect(0, 0, w * paint.headLen, h);
+  }
+
+  paintTex.needsUpdate = true;
+  eyeMat.color.set(paint.eye);
+}
+renderPaint();
 
 const lureGroup = new THREE.Group();
 scene.add(lureGroup);
@@ -513,6 +674,10 @@ function addDressing(s) {
     eye.position.set(s.length * 0.16, ey, side * hw * 0.92);
     eye.scale.z = 0.45;
     lureGroup.add(eye);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.5, 12, 10), pupilMat);
+    pupil.position.set(s.length * 0.16, ey, side * (hw * 0.92 + eyeR * 0.35));
+    pupil.scale.z = 0.35;
+    lureGroup.add(pupil);
   }
   // ラインアイ・フックアイ(トーラス)
   const ringGeo = new THREE.TorusGeometry(1.6, 0.45, 8, 16);
@@ -671,6 +836,43 @@ buildControls(PARAM_DEFS.body, 'bodyControls');
 buildControls(PARAM_DEFS.lip, 'lipControls');
 
 document.getElementById('lipOn').addEventListener('change', e => { state.lipOn = e.target.checked; rebuild(); });
+
+/* ---- カラーUI ---- */
+const PAINT_INPUTS = [
+  ['cBase', 'base', 'color'], ['cBackOn', 'backOn', 'check'], ['cBack', 'back', 'color'],
+  ['cBackW', 'backW', 'range'], ['cBlend', 'blend', 'range'],
+  ['cHeadOn', 'headOn', 'check'], ['cHead', 'head', 'color'], ['cHeadLen', 'headLen', 'range'],
+  ['cPattern', 'pattern', 'select'], ['cPatColor', 'patColor', 'color'], ['cPatAlpha', 'patAlpha', 'range'],
+  ['cEye', 'eye', 'color'],
+];
+for (const [id, key, kind] of PAINT_INPUTS) {
+  document.getElementById(id).addEventListener('input', e => {
+    paint[key] = kind === 'check' ? e.target.checked : kind === 'range' ? parseFloat(e.target.value) : e.target.value;
+    if (kind === 'range') document.getElementById(`val-${id}`).textContent = paint[key];
+    renderPaint();
+  });
+}
+function syncPaintUI() {
+  for (const [id, key, kind] of PAINT_INPUTS) {
+    const el = document.getElementById(id);
+    if (kind === 'check') el.checked = paint[key];
+    else el.value = paint[key];
+    if (kind === 'range') document.getElementById(`val-${id}`).textContent = paint[key];
+  }
+}
+const colorSel = document.getElementById('colorPreset');
+for (const name of Object.keys(COLOR_PRESETS)) {
+  const opt = document.createElement('option');
+  opt.value = name; opt.textContent = name;
+  colorSel.appendChild(opt);
+}
+colorSel.value = 'イワシ';
+colorSel.addEventListener('change', () => {
+  Object.assign(paint, COLOR_PRESETS[colorSel.value]);
+  syncPaintUI();
+  renderPaint();
+});
+syncPaintUI();
 
 renderer.localClippingEnabled = true;
 const cutPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
