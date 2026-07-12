@@ -7,17 +7,30 @@
 <style>
   :root {
     --bg: #10151c; --panel: #1a222d; --panel2: #232e3c;
-    --text: #e8edf2; --sub: #8fa0b3; --accent: #35b6ff;
+    --text: #e8edf2; --sub: #8fa0b3; --accent: #35b6ff; --like: #ff5f7a;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #2c3948; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #2c3948; flex-wrap: wrap; }
   h1 { font-size: 16px; }
   .sub { color: var(--sub); font-size: 11px; margin-top: 2px; }
-  header a { color: var(--accent); text-decoration: none; font-size: 13px; background: var(--panel2); border: 1px solid #3d4d61; padding: 8px 14px; border-radius: 8px; white-space: nowrap; }
-  header a:hover { filter: brightness(1.15); }
-  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; padding: 20px; max-width: 1200px; margin: 0 auto; }
-  .card { background: var(--panel); border: 1px solid #2c3948; border-radius: 10px; overflow: hidden; cursor: pointer; transition: transform .12s, border-color .12s; display: block; color: inherit; text-decoration: none; }
+  .hbtns { display: flex; gap: 8px; align-items: center; }
+  .hbtns .who { color: var(--sub); font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header a, header button {
+    color: var(--accent); text-decoration: none; font-size: 13px; background: var(--panel2);
+    border: 1px solid #3d4d61; padding: 8px 14px; border-radius: 8px; white-space: nowrap; cursor: pointer;
+  }
+  header a:hover, header button:hover { filter: brightness(1.15); }
+  #toolbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 14px 20px 0; max-width: 1200px; margin: 0 auto; }
+  #toolbar select { background: var(--panel2); color: var(--text); border: 1px solid #3d4d61; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-size: 12px; padding: 5px 11px; border-radius: 999px; cursor: pointer;
+    background: var(--panel); border: 1px solid #3d4d61; color: var(--sub); user-select: none;
+  }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #06283c; font-weight: bold; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; padding: 16px 20px 32px; max-width: 1200px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid #2c3948; border-radius: 10px; overflow: hidden; cursor: pointer; transition: transform .12s, border-color .12s; }
   .card:hover { transform: translateY(-2px); border-color: var(--accent); }
   .card img, .card .noimg { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #0c1117; }
   .card .noimg { display: flex; align-items: center; justify-content: center; color: var(--sub); font-size: 30px; }
@@ -25,7 +38,18 @@
   .name { font-size: 13px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .by { font-size: 11px; color: var(--sub); margin-top: 3px; }
   .remix { font-size: 10.5px; color: var(--accent); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tagrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; }
+  .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tag { font-size: 10px; color: var(--sub); background: var(--panel2); border-radius: 4px; padding: 2px 6px; }
+  .likeBtn {
+    display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--sub);
+    background: none; border: 1px solid #3d4d61; border-radius: 999px; padding: 3px 10px; cursor: pointer;
+  }
+  .likeBtn.liked { color: var(--like); border-color: var(--like); }
+  .likeBtn:hover { filter: brightness(1.25); }
   #status { text-align: center; color: var(--sub); padding: 48px 20px; font-size: 13px; grid-column: 1 / -1; }
+  footer { text-align: center; color: var(--sub); font-size: 12px; padding: 24px; border-top: 1px solid #2c3948; }
+  footer a { color: var(--sub); margin: 0 8px; }
 </style>
 </head>
 <body>
@@ -34,11 +58,26 @@
     <h1>🎣 lureworld ギャラリー</h1>
     <div class="sub">みんなの公開デザイン。開いてリミックスできる</div>
   </div>
-  <a href="index.html">＋ デザインを作る</a>
+  <div class="hbtns">
+    <span class="who" id="who"></span>
+    <button id="loginBtn" style="display:none">Google でログイン</button>
+    <a href="index.html">＋ デザインを作る</a>
+  </div>
 </header>
+
+<div id="toolbar">
+  <select id="sortSel">
+    <option value="new">新着順</option>
+    <option value="popular">人気順</option>
+  </select>
+  <div class="chips" id="typeChips"></div>
+  <div class="chips" id="sizeChips"></div>
+</div>
+
 <div id="grid"><div id="status">読み込み中…</div></div>
-<footer style="text-align:center;color:var(--sub);font-size:12px;padding:24px;border-top:1px solid #2c3948">
-  <a href="terms.html" style="color:var(--sub);margin:0 8px">利用規約</a>・<a href="privacy.html" style="color:var(--sub);margin:0 8px">プライバシーポリシー</a>
+
+<footer>
+  <a href="terms.html">利用規約</a>・<a href="privacy.html">プライバシーポリシー</a>
 </footer>
 
 <script type="module">
@@ -48,58 +87,180 @@ const SUPABASE_URL = 'https://guvobgzpchkohpboqqko.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1dm9iZ3pwY2hrb2hwYm9xcWtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3OTM4OTMsImV4cCI6MjA5OTM2OTg5M30.1yHRIaX6pLCHRxyghrbOcZIEvhBGvRtflVHbS5H0QuI';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const grid = document.getElementById('grid');
-const status = document.getElementById('status');
+const $ = id => document.getElementById(id);
+const grid = $('grid');
 
-const { data, error } = await supabase
-  .from('designs')
-  .select('id,name,thumb,updated_at,profiles(display_name),remix:remix_of(name)')
-  .eq('is_public', true)
-  .order('updated_at', { ascending: false })
-  .limit(60);
+const TYPES = ['すべて', 'ミノー', 'クランク', 'ポッパー', 'ペンシル・トップ'];
+const SIZES = ['すべて', '〜60mm', '60〜100mm', '100mm〜'];
+let typeFilter = 'すべて', sizeFilter = 'すべて', sortMode = 'new';
+let designs = [];
+let session = null;
+const myLikes = new Set();
 
-if (error) {
-  status.textContent = `読み込みに失敗した: ${error.message}`;
-} else if (!data.length) {
-  status.textContent = 'まだ公開デザインがない。最初の1匹を投稿しよう!';
-} else {
-  status.remove();
-  for (const d of data) {
+// params_json から自動タグ分類(投稿者の操作は不要)
+function classify(p) {
+  if (!p) return { type: 'その他', size: '-' };
+  const type = p.cupOn ? 'ポッパー'
+    : !p.lipOn ? 'ペンシル・トップ'
+    : p.lipAngle >= 45 ? 'クランク'
+    : 'ミノー';
+  const size = p.length < 60 ? '〜60mm' : p.length < 100 ? '60〜100mm' : '100mm〜';
+  return { type, size };
+}
+
+function buildChips(el, items, get, set) {
+  el.innerHTML = '';
+  for (const it of items) {
+    const c = document.createElement('span');
+    c.className = 'chip' + (get() === it ? ' on' : '');
+    c.textContent = it;
+    c.addEventListener('click', () => { set(it); buildChips(el, items, get, set); render(); });
+    el.appendChild(c);
+  }
+}
+
+function updateAuthUI() {
+  $('loginBtn').style.display = session ? 'none' : '';
+  $('who').textContent = session ? (session.user.user_metadata?.name || session.user.email) : '';
+}
+
+async function loadMyLikes() {
+  myLikes.clear();
+  if (!session || !designs.length) return;
+  const { data } = await supabase
+    .from('likes').select('design_id')
+    .eq('user_id', session.user.id)
+    .in('design_id', designs.map(d => d.id));
+  for (const r of data ?? []) myLikes.add(r.design_id);
+}
+
+async function toggleLike(d, btn, cnt) {
+  if (!session) {
+    btn.title = 'いいねにはログインが必要';
+    supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+    return;
+  }
+  if (myLikes.has(d.id)) {
+    const { error } = await supabase.from('likes').delete().eq('design_id', d.id).eq('user_id', session.user.id);
+    if (error) return;
+    myLikes.delete(d.id);
+    d.likeCount = Math.max(0, d.likeCount - 1);
+  } else {
+    const { error } = await supabase.from('likes').insert({ design_id: d.id });
+    if (error) return;
+    myLikes.add(d.id);
+    d.likeCount++;
+  }
+  btn.classList.toggle('liked', myLikes.has(d.id));
+  cnt.textContent = d.likeCount;
+}
+
+function render() {
+  grid.innerHTML = '';
+  let list = designs.filter(d =>
+    (typeFilter === 'すべて' || d.tags.type === typeFilter) &&
+    (sizeFilter === 'すべて' || d.tags.size === sizeFilter));
+  if (sortMode === 'popular') {
+    list = [...list].sort((a, b) => b.likeCount - a.likeCount || (a.updated_at < b.updated_at ? 1 : -1));
+  }
+  if (!list.length) {
+    const st = document.createElement('div');
+    st.id = 'status';
+    st.textContent = designs.length ? 'この条件のデザインはまだない' : 'まだ公開デザインがない。最初の1匹を投稿しよう!';
+    grid.appendChild(st);
+    return;
+  }
+  for (const d of list) {
     // ユーザー投稿データはinnerHTMLに入れず、DOM APIとtextContentで組み立てる(XSS対策)
-    const card = document.createElement('a');
+    const card = document.createElement('div');
     card.className = 'card';
-    card.href = `index.html?design=${encodeURIComponent(d.id)}`;
+    card.addEventListener('click', () => { location.href = `index.html?design=${encodeURIComponent(d.id)}`; });
 
     if (typeof d.thumb === 'string' && d.thumb.startsWith('data:image/')) {
       const img = document.createElement('img');
-      img.src = d.thumb;
-      img.alt = '';
+      img.src = d.thumb; img.alt = '';
       card.appendChild(img);
     } else {
       const ph = document.createElement('div');
-      ph.className = 'noimg';
-      ph.textContent = '🎣';
+      ph.className = 'noimg'; ph.textContent = '🎣';
       card.appendChild(ph);
     }
 
     const meta = document.createElement('div');
     meta.className = 'meta';
     const name = document.createElement('div');
-    name.className = 'name';
-    name.textContent = d.name;
+    name.className = 'name'; name.textContent = d.name;
     const by = document.createElement('div');
     by.className = 'by';
     by.textContent = `by ${d.profiles?.display_name ?? 'angler'} ・ ${new Date(d.updated_at).toLocaleDateString('ja-JP')}`;
     meta.append(name, by);
     if (d.remix?.name) {
       const rm = document.createElement('div');
-      rm.className = 'remix';
-      rm.textContent = `↻ リミックス元: ${d.remix.name}`;
+      rm.className = 'remix'; rm.textContent = `↻ リミックス元: ${d.remix.name}`;
       meta.appendChild(rm);
     }
+
+    const tagrow = document.createElement('div');
+    tagrow.className = 'tagrow';
+    const tags = document.createElement('div');
+    tags.className = 'tags';
+    for (const t of [d.tags.type, d.tags.size]) {
+      const tg = document.createElement('span');
+      tg.className = 'tag'; tg.textContent = t;
+      tags.appendChild(tg);
+    }
+    const likeBtn = document.createElement('button');
+    likeBtn.className = 'likeBtn' + (myLikes.has(d.id) ? ' liked' : '');
+    const heart = document.createElement('span');
+    heart.textContent = '♥';
+    const cnt = document.createElement('span');
+    cnt.textContent = d.likeCount;
+    likeBtn.append(heart, cnt);
+    likeBtn.addEventListener('click', e => { e.stopPropagation(); toggleLike(d, likeBtn, cnt); });
+    tagrow.append(tags, likeBtn);
+    meta.appendChild(tagrow);
+
     card.appendChild(meta);
     grid.appendChild(card);
   }
+}
+
+$('sortSel').addEventListener('change', () => { sortMode = $('sortSel').value; render(); });
+$('loginBtn').addEventListener('click', () =>
+  supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } }));
+buildChips($('typeChips'), TYPES, () => typeFilter, v => typeFilter = v);
+buildChips($('sizeChips'), SIZES, () => sizeFilter, v => sizeFilter = v);
+
+session = (await supabase.auth.getSession()).data.session;
+updateAuthUI();
+supabase.auth.onAuthStateChange(async (_ev, s) => {
+  session = s;
+  updateAuthUI();
+  await loadMyLikes();
+  render();
+});
+
+const { data, error } = await supabase
+  .from('designs')
+  .select('id,name,thumb,updated_at,params_json,profiles(display_name),remix:remix_of(name),likes(count)')
+  .eq('is_public', true)
+  .order('updated_at', { ascending: false })
+  .limit(60);
+
+if (error) {
+  grid.innerHTML = '';
+  const st = document.createElement('div');
+  st.id = 'status';
+  st.textContent = `読み込みに失敗した: ${error.message}`;
+  grid.appendChild(st);
+} else {
+  designs = (data ?? []).map(d => ({
+    ...d,
+    likeCount: d.likes?.[0]?.count ?? 0,
+    tags: classify(d.params_json),
+  }));
+  await loadMyLikes();
+  render();
 }
 </script>
 </body>
