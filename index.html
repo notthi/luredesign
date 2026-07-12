@@ -81,6 +81,8 @@
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.6/build/index.module.js",
+    "three-bvh-csg": "https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.17/build/index.module.js",
     "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
   }
 }
@@ -107,6 +109,11 @@
       <h2>リップ</h2>
       <label class="check"><input type="checkbox" id="lipOn" checked> リップあり</label>
       <div id="lipControls"></div>
+      <div class="radio2" style="margin-top:6px">
+        <label><input type="radio" name="lipMode" value="integrated" checked> 一体プリント</label>
+        <label><input type="radio" name="lipMode" value="separate"> 別体(ポリカ板)</label>
+      </div>
+      <div class="note" id="lipModeNote"></div>
     </div>
 
     <div class="section">
@@ -144,9 +151,9 @@
 
     <div class="section">
       <h2>内部構造</h2>
-      <label class="check"><input type="checkbox" id="hollowOn" checked> 背部を中空化(下部ソリッド)</label>
+      <label class="check"><input type="checkbox" id="hollowOn" checked> 中空化(薄殻+ヒートン隔壁)</label>
       <label class="check"><input type="checkbox" id="cutaway"> 断面表示(内部を確認)</label>
-      <div class="note">腹・ノーズ・テールはソリッドが残るため、ヒートン(ネジ式アイ)を直接ねじ込める。ヒートン下穴の自動配置は次スパイクで実装。</div>
+      <div class="note">ノーズ・テールのソリッド栓と、腹ヒートン位置(全長45%)のくさび形隔壁(腹側5mm厚→背中側1.4mm)にヒートン(ネジ式アイ)をねじ込む。隔壁は全周が殻に接続するためサポートレスで印刷可。下穴の自動配置は次スパイクで実装。</div>
     </div>
 
     <div class="section">
@@ -161,7 +168,7 @@
       </div>
       <div id="stats"></div>
       <span id="buoyBadge">—</span>
-      <div class="note">重量は生成メッシュ(下部ソリッド+背部中空、壁1.2mm)の実体積から算出。実測との誤差は試作で検証する。</div>
+      <div class="note">重量は生成メッシュ(薄殻1.2mm+ヒートン隔壁)の実体積から算出。実測との誤差は試作で検証する。</div>
     </div>
 
     <div class="section">
@@ -202,6 +209,8 @@
     <div class="section">
       <h2>出力</h2>
       <button id="dlBtn">⬇ STLダウンロード</button>
+      <button id="lipStlBtn" style="width:100%;margin-top:8px;display:none">⬇ リップ単体STL (平置き印刷用)</button>
+      <button id="lipSvgBtn" style="width:100%;margin-top:8px;display:none">📐 リップ型紙 (SVG / ポリカ板切り出し用)</button>
       <div id="sizeGuard"></div>
       <div class="note">単位: mm / 空洞入りボディ+リップの2シェル構成。スライスは壁3周・インフィル50%以上を推奨(ヒートン保持力)。左右分割・ウェイトチャンバー・ヒートン下穴は次スパイク。</div>
     </div>
@@ -218,6 +227,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createClient } from '@supabase/supabase-js';
+
+// CSG(リップスリット掘り込み用)。CDN障害時はスリット無しで動作継続する
+let csg = null;
+import('three-bvh-csg')
+  .then(m => { csg = m; if (state.lipOn && state.lipMode === 'separate') rebuild(); })
+  .catch(e => console.warn('three-bvh-csg の読み込みに失敗。スリット生成は無効:', e));
 
 /* ================= パラメータ定義 ================= */
 
@@ -247,11 +262,11 @@ const PARAM_DEFS = {
 const PRESETS = {
   'アジング ミノー 45mm':   { length: 45, height: 6.5, width: 5,  peak: 0.4,  noseFull: 1.0, tailFull: 1.4,  balance: 0.5,  section: 2.2, lipOn: true,  lipLen: 6,  lipWidth: 5,  lipAngle: 45, ballast: 0.6, cupOn: false },
   'トラウト ミノー 55mm':   { length: 55, height: 9,   width: 7,  peak: 0.38, noseFull: 0.95,tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 8,  lipWidth: 7,  lipAngle: 40, ballast: 1.2, cupOn: false },
-  'バス ミノー 90mm':       { length: 90, height: 14,  width: 10, peak: 0.38, noseFull: 0.9, tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 12, lipWidth: 9,  lipAngle: 30, ballast: 3.0, cupOn: false },
-  'クランクベイト 55mm':    { length: 55, height: 20,  width: 15, peak: 0.33, noseFull: 0.55,tailFull: 1.1,  balance: 0.44, section: 2.1, lipOn: true,  lipLen: 16, lipWidth: 13, lipAngle: 55, ballast: 3.5, cupOn: false },
-  'ポッパー 60mm':          { length: 60, height: 13,  width: 11, peak: 0.3,  noseFull: 0.42,tailFull: 1.2,  balance: 0.42, section: 2.4, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 2.0, cupOn: true, cupOpen: 0.65, cupDepth: 5, cupSlant: 15 },
-  'ペンシルベイト 100mm':   { length: 100,height: 13,  width: 11, peak: 0.42, noseFull: 0.8, tailFull: 1.1,  balance: 0.5,  section: 2.0, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 4.5, cupOn: false },
-  'シーバス ミノー 125mm':  { length: 125,height: 17,  width: 12, peak: 0.4,  noseFull: 0.95,tailFull: 1.3,  balance: 0.48, section: 2.5, lipOn: true,  lipLen: 14, lipWidth: 11, lipAngle: 22, ballast: 8.0, cupOn: false },
+  'バス ミノー 90mm':       { length: 90, height: 14,  width: 10, peak: 0.38, noseFull: 0.9, tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 12, lipWidth: 9,  lipAngle: 30, ballast: 0.8, cupOn: false },
+  'クランクベイト 55mm':    { length: 55, height: 20,  width: 15, peak: 0.33, noseFull: 0.55,tailFull: 1.1,  balance: 0.44, section: 2.1, lipOn: true,  lipLen: 16, lipWidth: 13, lipAngle: 55, ballast: 1.5, cupOn: false },
+  'ポッパー 60mm':          { length: 60, height: 13,  width: 11, peak: 0.3,  noseFull: 0.42,tailFull: 1.2,  balance: 0.42, section: 2.4, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 0.3, cupOn: true, cupOpen: 0.65, cupDepth: 5, cupSlant: 15 },
+  'ペンシルベイト 100mm':   { length: 100,height: 13,  width: 11, peak: 0.42, noseFull: 0.8, tailFull: 1.1,  balance: 0.5,  section: 2.0, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 1.0, cupOn: false },
+  'シーバス ミノー 125mm':  { length: 125,height: 17,  width: 12, peak: 0.4,  noseFull: 0.95,tailFull: 1.3,  balance: 0.48, section: 2.5, lipOn: true,  lipLen: 14, lipWidth: 11, lipAngle: 22, ballast: 2.5, cupOn: false },
 };
 
 const state = {};
@@ -259,6 +274,7 @@ for (const g of Object.values(PARAM_DEFS)) for (const p of g) state[p.key] = p.d
 state.lipOn = true;
 state.hollow = true;
 state.cupOn = false;
+state.lipMode = 'integrated';   // 'integrated'=一体プリント / 'separate'=別体ポリカ板
 
 /* ================= 材質・製造定数 ================= */
 
@@ -266,6 +282,12 @@ const PETG_DENSITY = 1.27;   // g/cm3
 const WALL_MM = 1.2;         // 0.4mmノズル×3周
 const LIP_THICK = 1.6;       // mm
 const P1S_BED = 256;         // mm
+
+// ヒートン隔壁(バルクヘッド)。SPEC 3.4「くさび形テーパー隔壁」参照
+const HEATON_BELLY_T = 0.45;  // 腹ヒートン位置(全長比)
+const BULKHEAD_T = 5;         // 隔壁の腹側厚(mm) = ねじ込みゾーン
+const BULKHEAD_TOP_T = 1.4;   // 隔壁の背中側最薄厚(mm)。0.4mmノズル3周+マージン
+const SCREW_ZONE_MM = 10;     // 腹側からこの高さまでは全厚を保つ
 
 // アクション目安の係数。実機テスト(印刷→泳がせて観察)の結果を積み重ねてここを調整する。
 // デザインデータとは独立に管理し、係数を変えても保存済みデザインは影響を受けない。
@@ -492,51 +514,78 @@ function buildLipGeometry(s) {
   return geo;
 }
 
-// 背部空洞: 床=中心線(下部ソリッド)、天井=背中沿い(壁厚確保)。法線は内向き
+// 内部空洞: 薄殻(壁1.2mm)の全断面空洞を、腹ヒートン位置のくさび形隔壁で前後2室に分割。
+// 隔壁は腹側(ねじ込みゾーン)がBULKHEAD_T、背中側へBULKHEAD_TOP_Tまでテーパー。法線は内向き
 function buildCavityGeometry(s) {
   const wall = WALL_MM;
-  if (s.height * s.balance - wall < 0.8 || s.width / 2 - wall < 0.6) return null; // 小型は中空化しない
-  // ノーズ・テールはソリッドで残す(ヒートン用)。カップ時はカップ底+壁厚の後ろから
-  const t0 = Math.min(s.cupOn ? Math.max(0.14, cupRimT(s) + (cupDepthMm(s) + wall) / s.length) : 0.14, 0.4);
+  if (s.height * s.balance - wall < 0.8 || s.height * (1 - s.balance) - wall < 0.8
+      || s.width / 2 - wall < 0.6) return null; // 小型は中空化しない
+  const L = s.length;
+  // ノーズ・テールはソリッド栓で残す(軸方向ヒートン用)。カップ時はカップ底+壁厚の後ろから
+  const t0 = Math.min(s.cupOn ? Math.max(0.14, cupRimT(s) + (cupDepthMm(s) + wall) / L) : 0.14, 0.4);
   const t1 = 0.86;
-  const M = 72, R = 40;
+
+  // 隔壁面の半ギャップ(x方向)。腹側はねじ込みゾーンとして全厚、上はテーパー
+  const xB = HEATON_BELLY_T * L;
+  const pB = profile(HEATON_BELLY_T, s.peak, s.noseFull, s.tailFull);
+  const hTopB = s.height * s.balance * pB;
+  const hBotB = s.height * (1 - s.balance) * pB;
+  const halfGap = y => {
+    const zoneTop = -hBotB + SCREW_ZONE_MM;
+    if (y <= zoneTop) return BULKHEAD_T / 2;
+    const u = Math.min((y - zoneTop) / Math.max(hTopB - zoneTop, 0.1), 1);
+    return (BULKHEAD_T + (BULKHEAD_TOP_T - BULKHEAD_T) * u) / 2;
+  };
+
   const positions = [], indices = [];
   const exp2n = 2 / s.section;
-  const ringStart = [];
-  for (let i = 0; i <= M; i++) {
-    const f = i / M;
-    const t = t0 + (t1 - t0) * f;
-    const ramp = smoothstep(f / 0.15) * smoothstep((1 - f) / 0.15);
-    const p = profile(t, s.peak, s.noseFull, s.tailFull);
-    const hTop = Math.max((s.height * s.balance * p - wall) * ramp, 0.02);
-    const hw = Math.max(((s.width / 2) * p - wall) * ramp, 0.02);
-    const x = t * s.length;
-    ringStart.push(positions.length / 3);
-    for (let j = 0; j < R; j++) {
-      const th = (j / R) * Math.PI * 2;
-      const cu = Math.cos(th), sv = Math.sin(th);
-      const z = hw * Math.sign(cu) * Math.pow(Math.abs(cu), exp2n);
-      const y = sv >= 0 ? hTop * Math.pow(sv, exp2n) : 0;   // 下半分は平らな床(下部ソリッド)
-      positions.push(x, y, z);
-    }
-  }
-  const nosePole = positions.length / 3; positions.push(t0 * s.length, 0.01, 0);
-  const tailPole = positions.length / 3; positions.push(t1 * s.length, 0.01, 0);
 
-  for (let i = 0; i < M; i++) {
-    const a = ringStart[i], b = ringStart[i + 1];
+  // 1セグメント = 前後端(xはy依存可、隔壁面を傾けるため)を結ぶ全断面ロフト
+  function addSegment(xStart, xEnd) {
+    if (xEnd(0) - xStart(0) < 3) return false;   // 短すぎる部屋は作らない
+    const M = 48, R = 40;
+    const ringStart = [];
+    for (let i = 0; i <= M; i++) {
+      const f = i / M;
+      const ramp = smoothstep(f / 0.15) * smoothstep((1 - f) / 0.15);
+      const tn = (xStart(0) + (xEnd(0) - xStart(0)) * f) / L;   // 断面サイズ用の名目位置
+      const p = profile(tn, s.peak, s.noseFull, s.tailFull);
+      const hTopIn = Math.max((s.height * s.balance * p - wall) * ramp, 0.02);
+      const hBotIn = Math.max((s.height * (1 - s.balance) * p - wall) * ramp, 0.02);
+      const hwIn = Math.max(((s.width / 2) * p - wall) * ramp, 0.02);
+      ringStart.push(positions.length / 3);
+      for (let j = 0; j < R; j++) {
+        const th = (j / R) * Math.PI * 2;
+        const cu = Math.cos(th), sv = Math.sin(th);
+        const z = hwIn * Math.sign(cu) * Math.pow(Math.abs(cu), exp2n);
+        const y = sv >= 0 ? hTopIn * Math.pow(sv, exp2n) : -hBotIn * Math.pow(-sv, exp2n);
+        const x = xStart(y) + (xEnd(y) - xStart(y)) * f;
+        positions.push(x, y, z);
+      }
+    }
+    const frontPole = positions.length / 3; positions.push(xStart(0), 0, 0);
+    const rearPole = positions.length / 3;  positions.push(xEnd(0), 0, 0);
+
+    for (let i = 0; i < M; i++) {
+      const a = ringStart[i], b = ringStart[i + 1];
+      for (let j = 0; j < R; j++) {
+        const j2 = (j + 1) % R;
+        indices.push(a + j, b + j, b + j2);
+        indices.push(a + j, b + j2, a + j2);
+      }
+    }
+    const first = ringStart[0], last = ringStart[M];
     for (let j = 0; j < R; j++) {
       const j2 = (j + 1) % R;
-      indices.push(a + j, b + j, b + j2);
-      indices.push(a + j, b + j2, a + j2);
+      indices.push(frontPole, first + j2, first + j);
+      indices.push(rearPole, last + j, last + j2);
     }
+    return true;
   }
-  const first = ringStart[0], last = ringStart[M];
-  for (let j = 0; j < R; j++) {
-    const j2 = (j + 1) % R;
-    indices.push(nosePole, first + j2, first + j);
-    indices.push(tailPole, last + j, last + j2);
-  }
+
+  const frontOK = addSegment(() => t0 * L, y => xB - halfGap(y));   // 前室(ノーズ栓〜隔壁)
+  const rearOK = addSegment(y => xB + halfGap(y), () => t1 * L);    // 後室(隔壁〜テール栓)
+  if (!frontOK && !rearOK) return null;
 
   orientOutward(positions, indices, true);
   const geo = new THREE.BufferGeometry();
@@ -548,6 +597,49 @@ function buildCavityGeometry(s) {
   geo.setIndex(indices);
   geo.computeVertexNormals();
   return geo;
+}
+
+/* ================= リップスリット(CSG) ================= */
+
+// 別体リップの差し込みスロット。buildLipGeometry と同じ取付原点・角度で、
+// リップ厚+0.25mm / 差し込み部最大幅+0.3mm のボックスをアゴ下に貫通させる
+function buildLipSlitGeometry(s) {
+  const embed = 3;
+  const len = s.lipLen + embed;
+  const tipHW = s.lipWidth / 2;
+  const p = profile(0.07, s.peak, s.noseFull, s.tailFull);
+  const rootHW = Math.max((s.width / 2) * p * 0.9, tipHW * 0.5);
+  const uIns = embed / len;
+  const hwIns = rootHW + (tipHW - rootHW) * smoothstep(uIns / 0.55);   // 差し込み部の最大半幅
+  const a = THREE.MathUtils.degToRad(s.lipAngle);
+  const axisLen = embed + 2.5;   // 根元側0.5mm余裕 + 表面側2mm貫通
+  const geo = new THREE.BoxGeometry(axisLen, LIP_THICK + 0.25, (hwIns + 0.15) * 2);
+  geo.rotateZ(Math.PI + a);      // ローカル+X → リップ軸方向(-cosA, -sinA)
+  const dc = axisLen / 2 - 0.5;
+  const yBot = -s.height * (1 - s.balance) * p;
+  const ox = s.length * 0.07 + embed * 0.6;
+  const oy = yBot + 0.9;
+  geo.translate(ox - Math.cos(a) * dc, oy - Math.sin(a) * dc, 0);
+  return geo;
+}
+
+function subtractLipSlit(outerGeo, s) {
+  if (!csg) return outerGeo;
+  try {
+    const slitGeo = buildLipSlitGeometry(s);
+    const ev = new csg.Evaluator();
+    ev.attributes = ['position', 'normal', 'uv'];
+    const a = new csg.Brush(outerGeo);
+    const b = new csg.Brush(slitGeo);
+    a.updateMatrixWorld();
+    b.updateMatrixWorld();
+    const out = ev.evaluate(a, b, csg.SUBTRACTION).geometry;
+    slitGeo.dispose();
+    return out;
+  } catch (e) {
+    console.warn('リップスリットの生成に失敗。スリット無しで継続:', e);
+    return outerGeo;
+  }
 }
 
 /* ================= 計測(体積・表面積) ================= */
@@ -734,8 +826,15 @@ function rebuild() {
 
   const s = state;
   const outerGeo = buildBodyGeometry(s);
+  // 別体リップ時はアゴ下に差し込みスリットを掘る(表示・STL共通)
+  const shellGeo = (s.lipOn && s.lipMode === 'separate') ? subtractLipSlit(outerGeo, s) : outerGeo;
   const cavGeo = s.hollow ? buildCavityGeometry(s) : null;
-  const bodyGeo = cavGeo ? mergeGeometries([outerGeo, cavGeo]) : outerGeo;
+  // CSG結果は非インデックス形式のため、merge時はインデックス形式を揃える
+  const bodyGeo = cavGeo
+    ? mergeGeometries(!!shellGeo.index === !!cavGeo.index
+        ? [shellGeo, cavGeo]
+        : [shellGeo.index ? shellGeo.toNonIndexed() : shellGeo, cavGeo.index ? cavGeo.toNonIndexed() : cavGeo])
+    : shellGeo;
   bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
   lureGroup.add(bodyMesh);
 
@@ -758,6 +857,7 @@ function rebuild() {
   if (cavGeo) { outerGeo.dispose(); cavGeo.dispose(); }
   lastMeasure = { dispMm3, matMm3 };
   updateStats(performance.now() - t0);
+  updateLipModeUI();
 }
 
 function addDressing(s) {
@@ -779,7 +879,7 @@ function addDressing(s) {
   const ringGeo = new THREE.TorusGeometry(1.6, 0.45, 8, 16);
   const spots = [
     { t: 0.001, dy: 0.2, rot: 0 },                       // ラインアイ(ノーズ)
-    { t: 0.45, dy: -1.05, rot: 0 },                      // 腹
+    { t: HEATON_BELLY_T, dy: -1.05, rot: 0 },            // 腹(隔壁位置と同期)
     { t: 0.999, dy: 0.0, rot: 0 },                       // テール
   ];
   for (const sp of spots) {
@@ -827,7 +927,8 @@ function updateStats(genMs) {
   else { badge.textContent = `シンキング (超過 ${fmt(totalW - dispW)} g)`; badge.style.color = 'var(--ng)'; }
 
   const guard = document.getElementById('sizeGuard');
-  const maxDim = state.length + (state.lipOn ? state.lipLen : 0);
+  // 別体リップは印刷物に含まれないため造形寸法から除外
+  const maxDim = state.length + (state.lipOn && state.lipMode !== 'separate' ? state.lipLen : 0);
   guard.innerHTML = maxDim <= P1S_BED
     ? `<span style="color:var(--ok)">✔ P1S 造形範囲内 (最大寸法 約${fmt(maxDim, 0)}mm / ${P1S_BED}mm)</span>`
     : `<span style="color:var(--ng)">✖ P1S 造形範囲超過</span>`;
@@ -875,11 +976,10 @@ function updateAction(totalW, ballast) {
 
 /* ================= STL出力(バイナリ) ================= */
 
-function exportSTL() {
-  const meshes = [bodyMesh, lipMesh].filter(Boolean);
+function writeBinarySTL(geometries, filename) {
   let triCount = 0;
-  const sources = meshes.map(m => {
-    const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
+  const sources = geometries.map(geo => {
+    const g = geo.index ? geo.toNonIndexed() : geo;
     triCount += g.getAttribute('position').count / 3;
     return g;
   });
@@ -910,9 +1010,26 @@ function exportSTL() {
   const blob = new Blob([buf], { type: 'application/octet-stream' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `lure_${state.length}mm.stl`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+function exportSTL() {
+  // 別体リップ時はボディSTLにリップを含めない(リップ単体STL or 型紙SVGで別途)
+  const meshes = [bodyMesh, state.lipMode === 'separate' ? null : lipMesh].filter(Boolean);
+  writeBinarySTL(meshes.map(m => m.geometry), `lure_${state.length}mm.stl`);
+}
+
+// リップ単体STL: 角度0で生成し直して平置き姿勢(積層がリップ面方向=強度確保)で出力
+function exportLipSTL() {
+  const g = buildLipGeometry({ ...state, lipAngle: 0 });
+  g.rotateX(Math.PI / 2);            // 板面をXY平面へ(厚み方向=Z)
+  g.computeBoundingBox();
+  const bb = g.boundingBox;
+  g.translate(-bb.min.x, -bb.min.y, -bb.min.z);   // ベッド原点に接地
+  writeBinarySTL([g], `lure_lip_${state.lipLen}mm.stl`);
+  g.dispose();
 }
 
 /* ================= UI構築 ================= */
@@ -939,6 +1056,64 @@ buildControls(PARAM_DEFS.cup, 'cupControls');
 
 document.getElementById('lipOn').addEventListener('change', e => { state.lipOn = e.target.checked; rebuild(); });
 document.getElementById('cupOn').addEventListener('change', e => { state.cupOn = e.target.checked; rebuild(); });
+
+/* ---- リップ出力形態(一体/別体) ---- */
+function updateLipModeUI() {
+  const sep = state.lipOn && state.lipMode === 'separate';
+  document.getElementById('lipStlBtn').style.display = sep ? '' : 'none';
+  document.getElementById('lipSvgBtn').style.display = sep ? '' : 'none';
+  document.getElementById('lipModeNote').textContent = state.lipMode === 'separate'
+    ? 'ボディのアゴ下に差し込みスリット(リップ厚+0.25mm)を自動生成し、STLにも反映。リップは①単体STLを平置き印刷(積層が面方向になり一体より強い)、または②型紙SVGでポリカ板(1.5mm厚目安)から切り出して差し込み接着。重量・浮力計算にはリップ分を含む。'
+    : '一体リップは積層方向の関係で強度が出にくい。実釣用途では別体を推奨(SPEC 3.4)。';
+}
+document.querySelectorAll('input[name=lipMode]').forEach(r => r.addEventListener('change', () => {
+  state.lipMode = document.querySelector('input[name=lipMode]:checked').value;
+  rebuild();   // スリットの掘り込み/除去と寸法ガードを反映
+}));
+
+// リップ型紙SVG(原寸mm)。輪郭は buildLipGeometry の幅プロファイルと同一式
+function exportLipSVG() {
+  const s = state;
+  const embed = 3;                       // ボディへの差し込み量(buildLipGeometryと同じ)
+  const len = s.lipLen + embed;
+  const tipHW = s.lipWidth / 2;
+  const p = profile(0.07, s.peak, s.noseFull, s.tailFull);
+  const rootHW = Math.max((s.width / 2) * p * 0.9, tipHW * 0.5);
+  const tipFrac = Math.min(tipHW / len, 0.35);
+  const hw = u => {
+    let w = rootHW + (tipHW - rootHW) * smoothstep(u / 0.55);
+    if (u > 1 - tipFrac) {
+      const q = (u - (1 - tipFrac)) / tipFrac;
+      w *= Math.sqrt(Math.max(1 - q * q, 0.0016));
+    }
+    return w;
+  };
+  const N = 80;
+  const right = [], left = [];
+  for (let i = 0; i <= N; i++) {
+    const u = i / N;
+    right.push(`${(len * u).toFixed(2)},${hw(u).toFixed(2)}`);
+    left.push(`${(len * u).toFixed(2)},${(-hw(u)).toFixed(2)}`);
+  }
+  const outline = 'M' + right.join(' L') + ' L' + left.reverse().join(' L') + ' Z';
+  const maxW = Math.max(rootHW, tipHW);
+  const pad = 4;
+  const w = len + pad * 2, h = maxW * 2 + pad * 2 + 8;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}mm" height="${h}mm" viewBox="${-pad} ${-maxW - pad} ${w} ${h}">
+  <path d="${outline}" fill="none" stroke="#000" stroke-width="0.3"/>
+  <line x1="${embed}" y1="${-maxW}" x2="${embed}" y2="${maxW}" stroke="#888" stroke-width="0.2" stroke-dasharray="1,1"/>
+  <text x="0" y="${(maxW + 6).toFixed(1)}" font-size="3" font-family="sans-serif">lureworld リップ型紙 原寸 / 全長${len.toFixed(1)}mm(うち差し込み${embed}mm=破線) / 最大幅${(maxW * 2).toFixed(1)}mm / 取付角${s.lipAngle}°</text>
+</svg>`;
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `lure_lip_${s.lipLen}mm.svg`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+document.getElementById('lipSvgBtn').addEventListener('click', exportLipSVG);
+document.getElementById('lipStlBtn').addEventListener('click', exportLipSTL);
+updateLipModeUI();
 
 /* ---- カラーUI ---- */
 const PAINT_INPUTS = [
@@ -1116,10 +1291,20 @@ function resolveUrlDesignOwnership() {
 
 // 保存済みデザインを形状・カラーUIへ反映
 function applyDesign(params, paintJson) {
-  // カップ実装前の保存データにはcupOnが無いので明示的にオフへ戻す
+  // 機能追加前の保存データに無いキーは既定値へ戻す
   if (!('cupOn' in params)) { state.cupOn = false; $('cupOn').checked = false; }
+  if (!('lipMode' in params)) {
+    state.lipMode = 'integrated';
+    document.querySelector('input[name=lipMode][value=integrated]').checked = true;
+  }
   for (const [k, v] of Object.entries(params)) {
     if (k === 'ballast') { $('ballast').value = v; continue; }
+    if (k === 'lipMode') {
+      state.lipMode = v;
+      const r = document.querySelector(`input[name=lipMode][value="${v}"]`);
+      if (r) r.checked = true;
+      continue;
+    }
     if (k === 'water') {
       const r = document.querySelector(`input[name=water][value="${v}"]`);
       if (r) r.checked = true;
