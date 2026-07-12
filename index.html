@@ -1369,7 +1369,7 @@ async function loadFromUrl() {
   const id = new URLSearchParams(location.search).get('design');
   if (!id) return;
   const { data, error } = await supabase
-    .from('designs').select('*, profiles(display_name)').eq('id', id).single();
+    .from('designs').select('*, profiles!designs_user_profile_fkey(display_name)').eq('id', id).single();
   if (error) { cloudMsg(`URLのデザインを読み込めなかった: ${error.message}`); return; }
   loadedFromUrl = data;
   $('designName').value = data.name;

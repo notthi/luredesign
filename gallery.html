@@ -16,11 +16,12 @@
   .sub { color: var(--sub); font-size: 11px; margin-top: 2px; }
   .hbtns { display: flex; gap: 8px; align-items: center; }
   .hbtns .who { color: var(--sub); font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  header a, header button {
+  header a, header button, .btn {
     color: var(--accent); text-decoration: none; font-size: 13px; background: var(--panel2);
     border: 1px solid #3d4d61; padding: 8px 14px; border-radius: 8px; white-space: nowrap; cursor: pointer;
   }
-  header a:hover, header button:hover { filter: brightness(1.15); }
+  header a:hover, header button:hover, .btn:hover { filter: brightness(1.15); }
+  .btn.primary { background: var(--accent); color: #06283c; font-weight: bold; border: none; }
   #toolbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 14px 20px 0; max-width: 1200px; margin: 0 auto; }
   #toolbar select { background: var(--panel2); color: var(--text); border: 1px solid #3d4d61; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -50,6 +51,25 @@
   #status { text-align: center; color: var(--sub); padding: 48px 20px; font-size: 13px; grid-column: 1 / -1; }
   footer { text-align: center; color: var(--sub); font-size: 12px; padding: 24px; border-top: 1px solid #2c3948; }
   footer a { color: var(--sub); margin: 0 8px; }
+
+  /* 詳細オーバーレイ */
+  #overlay { position: fixed; inset: 0; background: rgba(5, 8, 12, 0.78); display: none; align-items: flex-start; justify-content: center; padding: 4vh 16px; z-index: 10; overflow-y: auto; }
+  #overlay.open { display: flex; }
+  #detail { background: var(--panel); border: 1px solid #3d4d61; border-radius: 14px; max-width: 720px; width: 100%; overflow: hidden; }
+  #detail .hero { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #0c1117; }
+  #detail .body { padding: 16px 18px 20px; }
+  #detail .titleRow { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  #detail h2 { font-size: 17px; }
+  #detail .closeBtn { background: none; border: none; color: var(--sub); font-size: 20px; cursor: pointer; padding: 2px 6px; }
+  #detail .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  #detail h3 { font-size: 13px; color: var(--accent); margin: 20px 0 8px; }
+  .photoGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .photoGrid figure { position: relative; }
+  .photoGrid img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 8px; display: block; background: #0c1117; }
+  .photoGrid figcaption { font-size: 10.5px; color: var(--sub); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .photoDel { position: absolute; top: 4px; right: 4px; background: rgba(10,14,19,0.75); border: none; color: #f87171; border-radius: 6px; font-size: 11px; padding: 2px 7px; cursor: pointer; }
+  .reportLink { background: none; border: none; color: var(--sub); font-size: 11px; cursor: pointer; text-decoration: underline; padding: 0; }
+  .noteSm { font-size: 11px; color: var(--sub); margin-top: 6px; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -76,6 +96,9 @@
 
 <div id="grid"><div id="status">読み込み中…</div></div>
 
+<div id="overlay"><div id="detail"></div></div>
+<input type="file" id="photoFile" accept="image/*" style="display:none">
+
 <footer>
   <a href="terms.html">利用規約</a>・<a href="privacy.html">プライバシーポリシー</a>
 </footer>
@@ -95,6 +118,7 @@ const SIZES = ['すべて', '〜60mm', '60〜100mm', '100mm〜'];
 let typeFilter = 'すべて', sizeFilter = 'すべて', sortMode = 'new';
 let designs = [];
 let session = null;
+let currentDetail = null;
 const myLikes = new Set();
 
 // params_json から自動タグ分類(投稿者の操作は不要)
@@ -124,6 +148,10 @@ function updateAuthUI() {
   $('who').textContent = session ? (session.user.user_metadata?.name || session.user.email) : '';
 }
 
+function signIn() {
+  supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+}
+
 async function loadMyLikes() {
   myLikes.clear();
   if (!session || !designs.length) return;
@@ -134,25 +162,32 @@ async function loadMyLikes() {
   for (const r of data ?? []) myLikes.add(r.design_id);
 }
 
-async function toggleLike(d, btn, cnt) {
-  if (!session) {
-    btn.title = 'いいねにはログインが必要';
-    supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
-    return;
-  }
-  if (myLikes.has(d.id)) {
-    const { error } = await supabase.from('likes').delete().eq('design_id', d.id).eq('user_id', session.user.id);
-    if (error) return;
-    myLikes.delete(d.id);
-    d.likeCount = Math.max(0, d.likeCount - 1);
-  } else {
-    const { error } = await supabase.from('likes').insert({ design_id: d.id });
-    if (error) return;
-    myLikes.add(d.id);
-    d.likeCount++;
-  }
-  btn.classList.toggle('liked', myLikes.has(d.id));
+function makeLikeButton(d) {
+  const btn = document.createElement('button');
+  btn.className = 'likeBtn' + (myLikes.has(d.id) ? ' liked' : '');
+  const heart = document.createElement('span');
+  heart.textContent = '♥';
+  const cnt = document.createElement('span');
   cnt.textContent = d.likeCount;
+  btn.append(heart, cnt);
+  btn.addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!session) { signIn(); return; }
+    if (myLikes.has(d.id)) {
+      const { error } = await supabase.from('likes').delete().eq('design_id', d.id).eq('user_id', session.user.id);
+      if (error) return;
+      myLikes.delete(d.id);
+      d.likeCount = Math.max(0, d.likeCount - 1);
+    } else {
+      const { error } = await supabase.from('likes').insert({ design_id: d.id });
+      if (error) return;
+      myLikes.add(d.id);
+      d.likeCount++;
+    }
+    render();
+    if (currentDetail?.id === d.id) openDetail(d);   // 開いている詳細も更新
+  });
+  return btn;
 }
 
 function render() {
@@ -174,7 +209,7 @@ function render() {
     // ユーザー投稿データはinnerHTMLに入れず、DOM APIとtextContentで組み立てる(XSS対策)
     const card = document.createElement('div');
     card.className = 'card';
-    card.addEventListener('click', () => { location.href = `index.html?design=${encodeURIComponent(d.id)}`; });
+    card.addEventListener('click', () => openDetail(d));
 
     if (typeof d.thumb === 'string' && d.thumb.startsWith('data:image/')) {
       const img = document.createElement('img');
@@ -209,15 +244,7 @@ function render() {
       tg.className = 'tag'; tg.textContent = t;
       tags.appendChild(tg);
     }
-    const likeBtn = document.createElement('button');
-    likeBtn.className = 'likeBtn' + (myLikes.has(d.id) ? ' liked' : '');
-    const heart = document.createElement('span');
-    heart.textContent = '♥';
-    const cnt = document.createElement('span');
-    cnt.textContent = d.likeCount;
-    likeBtn.append(heart, cnt);
-    likeBtn.addEventListener('click', e => { e.stopPropagation(); toggleLike(d, likeBtn, cnt); });
-    tagrow.append(tags, likeBtn);
+    tagrow.append(tags, makeLikeButton(d));
     meta.appendChild(tagrow);
 
     card.appendChild(meta);
@@ -225,9 +252,202 @@ function render() {
   }
 }
 
+/* ---- 詳細オーバーレイ ---- */
+
+const photoUrl = path => `${SUPABASE_URL}/storage/v1/object/public/photos/${path}`;
+
+function openDetail(d) {
+  currentDetail = d;
+  const box = $('detail');
+  box.innerHTML = '';
+
+  if (typeof d.thumb === 'string' && d.thumb.startsWith('data:image/')) {
+    const hero = document.createElement('img');
+    hero.className = 'hero'; hero.src = d.thumb; hero.alt = '';
+    box.appendChild(hero);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'body';
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'titleRow';
+  const h2 = document.createElement('h2');
+  h2.textContent = d.name;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'closeBtn'; closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', closeDetail);
+  titleRow.append(h2, closeBtn);
+  body.appendChild(titleRow);
+
+  const by = document.createElement('div');
+  by.className = 'by';
+  by.textContent = `by ${d.profiles?.display_name ?? 'angler'} ・ ${new Date(d.updated_at).toLocaleDateString('ja-JP')} ・ ${d.tags.type} / ${d.tags.size}`;
+  body.appendChild(by);
+  if (d.remix?.name) {
+    const rm = document.createElement('div');
+    rm.className = 'remix'; rm.textContent = `↻ リミックス元: ${d.remix.name}`;
+    body.appendChild(rm);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const open = document.createElement('a');
+  open.className = 'btn primary';
+  open.href = `index.html?design=${encodeURIComponent(d.id)}`;
+  open.textContent = 'エディタで開く(リミックス)';
+  actions.append(open, makeLikeButton(d));
+  const rep = document.createElement('button');
+  rep.className = 'reportLink';
+  rep.textContent = '⚑ このデザインを通報';
+  rep.addEventListener('click', () => report('design', d.id));
+  actions.appendChild(rep);
+  body.appendChild(actions);
+
+  const h3 = document.createElement('h3');
+  h3.textContent = '🎣 釣果・プリント写真';
+  body.appendChild(h3);
+
+  const pg = document.createElement('div');
+  pg.className = 'photoGrid';
+  pg.textContent = '読み込み中…';
+  body.appendChild(pg);
+
+  const up = document.createElement('div');
+  up.style.marginTop = '10px';
+  const upBtn = document.createElement('button');
+  upBtn.className = 'btn';
+  upBtn.textContent = '📷 写真を投稿';
+  upBtn.addEventListener('click', () => {
+    if (!session) { signIn(); return; }
+    $('photoFile').onchange = e => {
+      const f = e.target.files[0];
+      e.target.value = '';
+      if (f) uploadPhoto(d, f, pg);
+    };
+    $('photoFile').click();
+  });
+  up.appendChild(upBtn);
+  const note = document.createElement('div');
+  note.className = 'noteSm';
+  note.textContent = 'このデザインで作った実物や釣果の写真を共有しよう(5MBまで/自動縮小)。不適切な写真は通報から。';
+  up.appendChild(note);
+  body.appendChild(up);
+
+  box.appendChild(body);
+  $('overlay').classList.add('open');
+  loadPhotos(d, pg);
+}
+
+function closeDetail() {
+  currentDetail = null;
+  $('overlay').classList.remove('open');
+}
+$('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeDetail(); });
+
+async function loadPhotos(d, pg) {
+  const { data, error } = await supabase
+    .from('design_photos')
+    .select('id,path,caption,user_id,created_at,profiles(display_name)')
+    .eq('design_id', d.id)
+    .order('created_at', { ascending: false });
+  pg.textContent = '';
+  if (error) { pg.textContent = `写真を読み込めなかった: ${error.message}`; return; }
+  if (!data.length) {
+    const empty = document.createElement('div');
+    empty.className = 'noteSm';
+    empty.textContent = 'まだ写真がない。最初の1枚を投稿しよう!';
+    pg.appendChild(empty);
+    return;
+  }
+  for (const ph of data) {
+    const fig = document.createElement('figure');
+    const a = document.createElement('a');
+    a.href = photoUrl(ph.path);
+    a.target = '_blank';
+    a.rel = 'noopener';
+    const img = document.createElement('img');
+    img.src = photoUrl(ph.path);
+    img.alt = '';
+    img.loading = 'lazy';
+    a.appendChild(img);
+    fig.appendChild(a);
+    const cap = document.createElement('figcaption');
+    const who = ph.profiles?.display_name ?? 'angler';
+    cap.textContent = ph.caption ? `${ph.caption} — ${who}` : `by ${who}`;
+    fig.appendChild(cap);
+
+    const canDelete = session && (ph.user_id === session.user.id || d.user_id === session.user.id);
+    if (canDelete) {
+      const del = document.createElement('button');
+      del.className = 'photoDel';
+      del.textContent = '削除';
+      del.addEventListener('click', async () => {
+        if (!confirm('この写真を削除する？')) return;
+        const { error: e1 } = await supabase.from('design_photos').delete().eq('id', ph.id);
+        if (e1) return;
+        if (ph.user_id === session.user.id) await supabase.storage.from('photos').remove([ph.path]);
+        loadPhotos(d, pg);
+      });
+      fig.appendChild(del);
+    } else if (session) {
+      const rp = document.createElement('button');
+      rp.className = 'photoDel';
+      rp.style.color = 'var(--sub)';
+      rp.textContent = '⚑';
+      rp.title = 'この写真を通報';
+      rp.addEventListener('click', () => report('photo', ph.id));
+      fig.appendChild(rp);
+    }
+    pg.appendChild(fig);
+  }
+}
+
+// アップロード前にブラウザ側で縮小(最大1600px, JPEG)
+function resizeImage(file, maxDim = 1600, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const sc = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * sc);
+      c.height = Math.round(img.height * sc);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      c.toBlob(b => b ? resolve(b) : reject(new Error('画像の変換に失敗')), 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error('画像を読み込めない')); };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function uploadPhoto(d, file, pg) {
+  try {
+    const caption = (prompt('ひとこと(任意):') ?? '').slice(0, 100);
+    const blob = await resizeImage(file);
+    const path = `${session.user.id}/${crypto.randomUUID()}.jpg`;
+    const { error: e1 } = await supabase.storage.from('photos').upload(path, blob, { contentType: 'image/jpeg' });
+    if (e1) throw e1;
+    const { error: e2 } = await supabase.from('design_photos').insert({ design_id: d.id, path, caption });
+    if (e2) throw e2;
+    loadPhotos(d, pg);
+  } catch (e) {
+    alert(`投稿に失敗した: ${e.message ?? e}`);
+  }
+}
+
+async function report(type, id) {
+  if (!session) { signIn(); return; }
+  const reason = prompt('通報理由(任意):');
+  if (reason === null) return;
+  const { error } = await supabase.from('reports').insert({ target_type: type, target_id: id, reason: reason.slice(0, 300) });
+  alert(error ? `通報に失敗した: ${error.message}` : '通報を受け付けた。確認のうえ対応する。');
+}
+
+/* ---- 初期化 ---- */
+
 $('sortSel').addEventListener('change', () => { sortMode = $('sortSel').value; render(); });
-$('loginBtn').addEventListener('click', () =>
-  supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } }));
+$('loginBtn').addEventListener('click', signIn);
 buildChips($('typeChips'), TYPES, () => typeFilter, v => typeFilter = v);
 buildChips($('sizeChips'), SIZES, () => sizeFilter, v => sizeFilter = v);
 
@@ -242,7 +462,7 @@ supabase.auth.onAuthStateChange(async (_ev, s) => {
 
 const { data, error } = await supabase
   .from('designs')
-  .select('id,name,thumb,updated_at,params_json,profiles(display_name),remix:remix_of(name),likes(count)')
+  .select('id,name,thumb,updated_at,user_id,params_json,profiles!designs_user_profile_fkey(display_name),remix:remix_of(name),likes(count)')
   .eq('is_public', true)
   .order('updated_at', { ascending: false })
   .limit(60);
