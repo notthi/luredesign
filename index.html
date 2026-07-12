@@ -124,6 +124,13 @@
     </div>
 
     <div class="section">
+      <h2>ジョイント</h2>
+      <label class="check"><input type="checkbox" id="jointOn"> ジョイントあり(2分割)</label>
+      <div id="jointControls"></div>
+      <div class="note">垂直の平面カットで前後2ピースに分割。両分割面の中心に接続用ヒートンの目印凹みを自動生成し、分割面の裏には5mmのソリッド壁を確保。ヒートン2本をスプリットリング等で連結して組み立てる。V字カットや多連ジョイントは今後。</div>
+    </div>
+
+    <div class="section">
       <h2>カラー</h2>
       <select id="colorPreset"></select>
       <div style="height:10px"></div>
@@ -257,16 +264,20 @@ const PARAM_DEFS = {
     { key: 'cupDepth', label: '深さ (mm)',        min: 2,   max: 12,  step: 0.5,  def: 5 },
     { key: 'cupSlant', label: '傾き (°)',         min: 0,   max: 35,  step: 1,    def: 15 },
   ],
+  joint: [
+    { key: 'jointT',   label: '分割位置',         min: 0.52, max: 0.8, step: 0.01, def: 0.62 },
+    { key: 'jointGap', label: '隙間 (mm)',        min: 1,    max: 4,   step: 0.1,  def: 2 },
+  ],
 };
 
 const PRESETS = {
-  'アジング ミノー 45mm':   { length: 45, height: 6.5, width: 5,  peak: 0.4,  noseFull: 1.0, tailFull: 1.4,  balance: 0.5,  section: 2.2, lipOn: true,  lipLen: 6,  lipWidth: 5,  lipAngle: 45, ballast: 0.6, cupOn: false },
-  'トラウト ミノー 55mm':   { length: 55, height: 9,   width: 7,  peak: 0.38, noseFull: 0.95,tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 8,  lipWidth: 7,  lipAngle: 40, ballast: 1.2, cupOn: false },
-  'バス ミノー 90mm':       { length: 90, height: 14,  width: 10, peak: 0.38, noseFull: 0.9, tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 12, lipWidth: 9,  lipAngle: 30, ballast: 0.8, cupOn: false },
-  'クランクベイト 55mm':    { length: 55, height: 20,  width: 15, peak: 0.33, noseFull: 0.55,tailFull: 1.1,  balance: 0.44, section: 2.1, lipOn: true,  lipLen: 16, lipWidth: 13, lipAngle: 55, ballast: 1.5, cupOn: false },
-  'ポッパー 60mm':          { length: 60, height: 13,  width: 11, peak: 0.3,  noseFull: 0.42,tailFull: 1.2,  balance: 0.42, section: 2.4, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 0.3, cupOn: true, cupOpen: 0.65, cupDepth: 5, cupSlant: 15 },
-  'ペンシルベイト 100mm':   { length: 100,height: 13,  width: 11, peak: 0.42, noseFull: 0.8, tailFull: 1.1,  balance: 0.5,  section: 2.0, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 1.0, cupOn: false },
-  'シーバス ミノー 125mm':  { length: 125,height: 17,  width: 12, peak: 0.4,  noseFull: 0.95,tailFull: 1.3,  balance: 0.48, section: 2.5, lipOn: true,  lipLen: 14, lipWidth: 11, lipAngle: 22, ballast: 2.5, cupOn: false },
+  'アジング ミノー 45mm':   { length: 45, height: 6.5, width: 5,  peak: 0.4,  noseFull: 1.0, tailFull: 1.4,  balance: 0.5,  section: 2.2, lipOn: true,  lipLen: 6,  lipWidth: 5,  lipAngle: 45, ballast: 0.6, cupOn: false, jointOn: false },
+  'トラウト ミノー 55mm':   { length: 55, height: 9,   width: 7,  peak: 0.38, noseFull: 0.95,tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 8,  lipWidth: 7,  lipAngle: 40, ballast: 1.2, cupOn: false, jointOn: false },
+  'バス ミノー 90mm':       { length: 90, height: 14,  width: 10, peak: 0.38, noseFull: 0.9, tailFull: 1.35, balance: 0.48, section: 2.3, lipOn: true,  lipLen: 12, lipWidth: 9,  lipAngle: 30, ballast: 0.8, cupOn: false, jointOn: false },
+  'クランクベイト 55mm':    { length: 55, height: 20,  width: 15, peak: 0.33, noseFull: 0.55,tailFull: 1.1,  balance: 0.44, section: 2.1, lipOn: true,  lipLen: 16, lipWidth: 13, lipAngle: 55, ballast: 1.5, cupOn: false, jointOn: false },
+  'ポッパー 60mm':          { length: 60, height: 13,  width: 11, peak: 0.3,  noseFull: 0.42,tailFull: 1.2,  balance: 0.42, section: 2.4, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 0.3, cupOn: true, cupOpen: 0.65, cupDepth: 5, cupSlant: 15, jointOn: false },
+  'ペンシルベイト 100mm':   { length: 100,height: 13,  width: 11, peak: 0.42, noseFull: 0.8, tailFull: 1.1,  balance: 0.5,  section: 2.0, lipOn: false, lipLen: 8,  lipWidth: 8,  lipAngle: 30, ballast: 1.0, cupOn: false, jointOn: false },
+  'シーバス ミノー 125mm':  { length: 125,height: 17,  width: 12, peak: 0.4,  noseFull: 0.95,tailFull: 1.3,  balance: 0.48, section: 2.5, lipOn: true,  lipLen: 14, lipWidth: 11, lipAngle: 22, ballast: 2.5, cupOn: false, jointOn: false },
 };
 
 const state = {};
@@ -275,6 +286,7 @@ state.lipOn = true;
 state.hollow = true;
 state.cupOn = false;
 state.lipMode = 'integrated';   // 'integrated'=一体プリント / 'separate'=別体ポリカ板
+state.jointOn = false;
 
 /* ================= 材質・製造定数 ================= */
 
@@ -289,6 +301,7 @@ const BULKHEAD_T = 5;         // 隔壁の腹側厚(mm) = ねじ込みゾーン
 const BULKHEAD_TOP_T = 1.4;   // 隔壁の背中側最薄厚(mm)。0.4mmノズル3周+マージン
 const SCREW_ZONE_MM = 10;     // 腹側からこの高さまでは全厚を保つ
 const DIMPLE_R = 0.75;        // ヒートン位置の目印凹み(半球)の半径(mm)
+const JOINT_WALL = 5;         // ジョイント分割面の裏に残すソリッド壁(接続ヒートンねじ込み用, mm)
 
 // アクション目安の係数。実機テスト(印刷→泳がせて観察)の結果を積み重ねてここを調整する。
 // デザインデータとは独立に管理し、係数を変えても保存済みデザインは影響を受けない。
@@ -314,13 +327,18 @@ function cupRimT(s) { return 0.03 + 0.11 * s.cupOpen; }
 // カップ深さ(mm)。ノーズ側ソリッド部に収まるようクランプ
 function cupDepthMm(s) { return Math.min(s.cupDepth, (0.30 - cupRimT(s)) * s.length); }
 
+// ジョイント分割位置(前セグメント終端 / 後セグメント始端のt)
+function jointTf(s) { return s.jointT - (s.jointGap / 2) / s.length; }
+function jointTr(s) { return s.jointT + (s.jointGap / 2) / s.length; }
+
 function buildBodyGeometry(s) {
-  const M = 110;         // 長手方向分割
+  const M = 110;         // 長手方向分割(全長換算)
   const R = 56;          // 周方向分割
   const L = s.length;
   const positions = [];
   const indices = [];
   const uvs = [];
+  const exp2n = 2 / s.section;
 
   const cupOn = !!s.cupOn;
   const tRim = cupOn ? cupRimT(s) : 0;
@@ -328,47 +346,80 @@ function buildBodyGeometry(s) {
   const slantTan = cupOn ? Math.tan(THREE.MathUtils.degToRad(s.cupSlant)) : 0;
   const blendEnd = tRim + 0.10;   // スラントをボディへ馴染ませる範囲
 
-  // 端の丸みを保つためコサイン分布でサンプリング(カップ時は縁位置から開始)
-  const ts = [];
-  for (let i = 0; i <= M; i++) {
-    const f = 0.5 * (1 - Math.cos(Math.PI * i / M));
-    ts.push(tRim + (1 - tRim) * f);
-  }
+  const jointOn = !!s.jointOn;
+  const tJf = jointOn ? jointTf(s) : 1;
+  const tJr = jointOn ? jointTr(s) : 1;
 
-  const ringStart = [];
-  const exp2n = 2 / s.section;
-
-  for (let i = 0; i <= M; i++) {
-    const t = ts[i];
+  // リング1周を追加して先頭頂点indexを返す。qで断面をスケール、xFixedでx座標を固定
+  // j=R は j=0 と同一座標(UVのみ1.0)。テクスチャの継ぎ目は目立たない腹側中央に置く
+  function addRing(t, q = 1, xFixed = null) {
     const p = profile(t, s.peak, s.noseFull, s.tailFull);
     // 端は完全に0だと縮退するので極小半径でクランプ→ポールで閉じる
     const pc = Math.max(p, 0.004);
-    const hTop = s.height * s.balance * pc;
-    const hBot = s.height * (1 - s.balance) * pc;
-    const hw = (s.width / 2) * pc;
-    ringStart.push(positions.length / 3);
-    // j=R は j=0 と同一座標(UVのみ1.0)。テクスチャの継ぎ目は目立たない腹側中央に置く
+    const hTop = s.height * s.balance * pc * q;
+    const hBot = s.height * (1 - s.balance) * pc * q;
+    const hw = (s.width / 2) * pc * q;
+    const start = positions.length / 3;
     for (let j = 0; j <= R; j++) {
       const th = -Math.PI / 2 + ((j % R) / R) * Math.PI * 2;
       const cu = Math.cos(th), sv = Math.sin(th);
       const z = hw * Math.sign(cu) * Math.pow(Math.abs(cu), exp2n);
       const hy = sv >= 0 ? hTop : hBot;
       const y = hy * Math.sign(sv) * Math.pow(Math.abs(sv), exp2n);
-      let x = t * L;
+      let x = xFixed !== null ? xFixed : t * L;
       // カップの傾き: 上唇が前に出るよう前面を傾け、後方へ滑らかに馴染ませる
-      if (slantTan > 0 && t < blendEnd) {
+      if (xFixed === null && slantTan > 0 && t < blendEnd) {
         x -= slantTan * y * smoothstep((blendEnd - t) / (blendEnd - tRim));
       }
       positions.push(x, y, z);
       uvs.push(t, j / R);   // U=ノーズ→テール / V=腹→背→腹(周方向)
     }
+    return start;
   }
 
-  // カップ内面: 縁リングを中心軸へ縮小しつつ奥(+X)へ送ってお椀状に窪ませる
+  function addPole(x, u) {
+    const idx = positions.length / 3;
+    positions.push(x, 0, 0);
+    uvs.push(u, 0.5);
+    return idx;
+  }
+
+  // リング列 + 前後ポールを1つの閉シェルに繋ぐ
+  function stitch(rings, frontPole, rearPole) {
+    for (let i = 0; i < rings.length - 1; i++) {
+      const a = rings[i], b = rings[i + 1];
+      for (let j = 0; j < R; j++) {
+        indices.push(a + j, b + j, b + j + 1);
+        indices.push(a + j, b + j + 1, a + j + 1);
+      }
+    }
+    const first = rings[0], last = rings[rings.length - 1];
+    for (let j = 0; j < R; j++) {
+      indices.push(frontPole, first + j + 1, first + j);
+      indices.push(rearPole, last + j, last + j + 1);
+    }
+  }
+
+  // 端の丸みを保つためコサイン分布でサンプリング
+  function ringTs(ta, tb, n) {
+    const ts = [];
+    for (let i = 0; i <= n; i++) ts.push(ta + (tb - ta) * 0.5 * (1 - Math.cos(Math.PI * i / n)));
+    return ts;
+  }
+
+  const allRings = [];
+  const CAPK = 6;   // 分割面(フラットキャップ)の同心リング数
+
+  /* --- 前セグメント: ノーズ(カップ)〜 ジョイント前端 or テール --- */
+  const bodyRingsA = [];
+  const nA = Math.max(Math.round(M * (tJf - tRim)), 24);
+  for (const t of ringTs(tRim, tJf, nA)) bodyRingsA.push(addRing(t));
+
+  // カップ内面: 縁リング(bodyRingsA[0])を中心軸へ縮小しつつ奥(+X)へ送ってお椀状に窪ませる
   const cupRings = [];   // カップ底側→縁の順
   if (cupOn) {
     const K = 12;
-    const rimBase = ringStart[0] * 3;
+    const rimBase = bodyRingsA[0] * 3;
     for (let k = 1; k < K; k++) {
       const q = k / K;   // 0=カップ底の中心, 1=縁
       cupRings.push(positions.length / 3);
@@ -382,28 +433,24 @@ function buildBodyGeometry(s) {
     }
   }
 
-  // リング列: カップ底側→縁→ボディ→テール の一続きの面として繋ぐ
-  const rings = [...cupRings, ...ringStart];
+  const stripA = [...cupRings, ...bodyRingsA];
+  // ジョイント時は垂直の平面カットで閉じる(同心リングを縮小するフラットキャップ)
+  if (jointOn) for (let k = CAPK - 1; k >= 1; k--) stripA.push(addRing(tJf, k / CAPK, tJf * L));
+  const frontPoleA = addPole(cupOn ? tRim * L + cupDepth : 0, 0);
+  const rearPoleA = addPole(jointOn ? tJf * L : L, jointOn ? tJf : 1);
+  stitch(stripA, frontPoleA, rearPoleA);
+  allRings.push(...stripA);
 
-  // ポール頂点(前端=カップ底 or ノーズ、後端=テール)
-  const noseIdx = positions.length / 3;
-  positions.push(cupOn ? tRim * L + cupDepth : 0, 0, 0); uvs.push(0, 0.5);
-  const tailIdx = positions.length / 3;
-  positions.push(L, 0, 0); uvs.push(1, 0.5);
-
-  // 側面
-  for (let i = 0; i < rings.length - 1; i++) {
-    const a = rings[i], b = rings[i + 1];
-    for (let j = 0; j < R; j++) {
-      indices.push(a + j, b + j, b + j + 1);
-      indices.push(a + j, b + j + 1, a + j + 1);
-    }
-  }
-  // キャップ
-  const first = rings[0], last = rings[rings.length - 1];
-  for (let j = 0; j < R; j++) {
-    indices.push(noseIdx, first + j + 1, first + j);
-    indices.push(tailIdx, last + j, last + j + 1);
+  /* --- 後セグメント(ジョイント時のみ): 平面カット〜テール --- */
+  if (jointOn) {
+    const stripB = [];
+    for (let k = 1; k < CAPK; k++) stripB.push(addRing(tJr, k / CAPK, tJr * L));
+    const nB = Math.max(Math.round(M * (1 - tJr)), 24);
+    for (const t of ringTs(tJr, 1, nB)) stripB.push(addRing(t));
+    const frontPoleB = addPole(tJr * L, tJr);
+    const tailPoleB = addPole(L, 1);
+    stitch(stripB, frontPoleB, tailPoleB);
+    allRings.push(...stripB);
   }
 
   orientOutward(positions, indices);
@@ -414,7 +461,7 @@ function buildBodyGeometry(s) {
   geo.computeVertexNormals();
   // 継ぎ目(j=0とj=R)は頂点が分かれるため、法線を平均してシェーディングの筋を消す
   const nrm = geo.getAttribute('normal');
-  for (const start of rings) {
+  for (const start of allRings) {
     const a = start, b = a + R;
     const nx = nrm.getX(a) + nrm.getX(b), ny = nrm.getY(a) + nrm.getY(b), nz = nrm.getZ(a) + nrm.getZ(b);
     const l = Math.hypot(nx, ny, nz) || 1;
@@ -584,9 +631,17 @@ function buildCavityGeometry(s) {
     return true;
   }
 
-  const frontOK = addSegment(() => t0 * L, y => xB - halfGap(y));   // 前室(ノーズ栓〜隔壁)
-  const rearOK = addSegment(y => xB + halfGap(y), () => t1 * L);    // 後室(隔壁〜テール栓)
-  if (!frontOK && !rearOK) return null;
+  const built = [];
+  built.push(addSegment(() => t0 * L, y => xB - halfGap(y)));   // 前室(ノーズ栓〜隔壁)
+  if (s.jointOn) {
+    // ジョイント時: 分割面の裏にJOINT_WALLのソリッドを残して後室を2つに分ける
+    const xJf = jointTf(s) * L, xJr = jointTr(s) * L;
+    built.push(addSegment(y => xB + halfGap(y), () => xJf - JOINT_WALL));   // 中室(隔壁〜分割面前)
+    built.push(addSegment(() => xJr + JOINT_WALL, () => t1 * L));           // 尾室(分割面後〜テール栓)
+  } else {
+    built.push(addSegment(y => xB + halfGap(y), () => t1 * L));   // 後室(隔壁〜テール栓)
+  }
+  if (!built.some(Boolean)) return null;
 
   orientOutward(positions, indices, true);
   const geo = new THREE.BufferGeometry();
@@ -634,6 +689,10 @@ function carveBodyDetails(outerGeo, s) {
     [HEATON_BELLY_T * s.length, -s.height * (1 - s.balance) * pB],   // 腹(隔壁位置)
     [s.length, 0],                                                    // テール
   ];
+  if (s.jointOn) {
+    spots.push([jointTf(s) * s.length, 0]);   // ジョイント前側分割面の中心
+    spots.push([jointTr(s) * s.length, 0]);   // ジョイント後側分割面の中心
+  }
   for (const [x, y] of spots) {
     const g = new THREE.SphereGeometry(DIMPLE_R, 12, 8);
     g.translate(x, y, 0);   // 表面上に中心を置く=深さ半径ぶんの半球凹み
@@ -928,6 +987,17 @@ function addDressing(s) {
     ring.position.set(x, y, 0);
     lureGroup.add(ring);
   }
+  // ジョイント連結部(演出): 分割面の中心で直交する2つの小リング
+  if (s.jointOn) {
+    const xMid = s.jointT * s.length;
+    const jGeo = new THREE.TorusGeometry(1.2, 0.4, 8, 16);
+    const jr1 = new THREE.Mesh(jGeo, wireMat);
+    jr1.position.set(xMid, 0, 0);
+    const jr2 = new THREE.Mesh(jGeo, wireMat);
+    jr2.position.set(xMid, 0, 0);
+    jr2.rotation.x = Math.PI / 2;
+    lureGroup.add(jr1, jr2);
+  }
 }
 
 /* ================= 浮力・統計 ================= */
@@ -991,6 +1061,7 @@ function updateAction(totalW, ballast) {
   else if (idx < 0.11) actionLabel = 'タイトウォブル';
   else if (idx < 0.2) actionLabel = 'ミディアムウォブル';
   else actionLabel = 'ワイドウォブル';
+  if (s.jointOn) actionLabel += ' +テールスイング';
   const rollLabel = aspect > 1.5 ? 'ロール強め' : aspect > 1.1 ? 'ウォブンロール' : 'ウォブル主体';
   const stabLabel = stab > 0.42 ? '高(破綻しにくい)' : stab > 0.3 ? '中' : '低(暴れやすい)';
 
@@ -1088,9 +1159,11 @@ function buildControls(defs, containerId) {
 buildControls(PARAM_DEFS.body, 'bodyControls');
 buildControls(PARAM_DEFS.lip, 'lipControls');
 buildControls(PARAM_DEFS.cup, 'cupControls');
+buildControls(PARAM_DEFS.joint, 'jointControls');
 
 document.getElementById('lipOn').addEventListener('change', e => { state.lipOn = e.target.checked; rebuild(); });
 document.getElementById('cupOn').addEventListener('change', e => { state.cupOn = e.target.checked; rebuild(); });
+document.getElementById('jointOn').addEventListener('change', e => { state.jointOn = e.target.checked; rebuild(); });
 
 /* ---- リップ出力形態(一体/別体) ---- */
 function updateLipModeUI() {
@@ -1328,6 +1401,7 @@ function resolveUrlDesignOwnership() {
 function applyDesign(params, paintJson) {
   // 機能追加前の保存データに無いキーは既定値へ戻す
   if (!('cupOn' in params)) { state.cupOn = false; $('cupOn').checked = false; }
+  if (!('jointOn' in params)) { state.jointOn = false; $('jointOn').checked = false; }
   if (!('lipMode' in params)) {
     state.lipMode = 'integrated';
     document.querySelector('input[name=lipMode][value=integrated]').checked = true;
@@ -1347,6 +1421,7 @@ function applyDesign(params, paintJson) {
     }
     if (k === 'lipOn') { state.lipOn = v; $('lipOn').checked = v; continue; }
     if (k === 'cupOn') { state.cupOn = v; $('cupOn').checked = v; continue; }
+    if (k === 'jointOn') { state.jointOn = v; $('jointOn').checked = v; continue; }
     if (k === 'hollow') { state.hollow = v; $('hollowOn').checked = v; continue; }
     if (k in state) {
       state[k] = v;
@@ -1425,6 +1500,7 @@ function applyPreset(name) {
     if (k === 'ballast') { document.getElementById('ballast').value = v; continue; }
     if (k === 'lipOn') { state.lipOn = v; document.getElementById('lipOn').checked = v; continue; }
     if (k === 'cupOn') { state.cupOn = v; document.getElementById('cupOn').checked = v; continue; }
+    if (k === 'jointOn') { state.jointOn = v; document.getElementById('jointOn').checked = v; continue; }
     state[k] = v;
     const slider = document.querySelector(`input[data-key=${k}]`);
     if (slider) { slider.value = v; document.getElementById(`val-${k}`).textContent = v; }
