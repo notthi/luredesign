@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ルアーデザイナー Phase 0 プロトタイプ</title>
+<title>lureworld | ルアーデザイナー</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎣</text></svg>">
 <style>
   :root {
     --bg: #10151c;
@@ -18,15 +19,26 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; overflow: hidden; font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; background: var(--bg); color: var(--text); }
-  #app { display: flex; height: 100%; }
+  body { display: flex; flex-direction: column; }
+  #topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid #2c3948; flex-shrink: 0;
+  }
+  .brand { font-size: 15px; font-weight: bold; display: flex; align-items: baseline; gap: 10px; }
+  .brand .tag { color: var(--sub); font-size: 11px; font-weight: normal; }
+  #topbar nav { display: flex; gap: 8px; }
+  #topbar nav a {
+    color: var(--accent); text-decoration: none; font-size: 12.5px;
+    background: var(--panel2); border: 1px solid #3d4d61; padding: 6px 12px; border-radius: 8px; white-space: nowrap;
+  }
+  #topbar nav a:hover { filter: brightness(1.15); }
+  #app { display: flex; flex: 1; min-height: 0; }
   #viewport { flex: 1; position: relative; min-width: 0; min-height: 0; }
   #viewport canvas { display: block; position: absolute; top: 0; left: 0; }
   #panel {
     width: 340px; flex-shrink: 0; background: var(--panel);
     overflow-y: auto; padding: 16px; border-left: 1px solid #2c3948;
   }
-  h1 { font-size: 15px; margin-bottom: 2px; }
-  .sub { color: var(--sub); font-size: 11px; margin-bottom: 14px; }
   .section { background: var(--panel2); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
   .section h2 { font-size: 12px; color: var(--accent); margin-bottom: 10px; letter-spacing: 0.05em; }
   .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -67,13 +79,13 @@
   .note { font-size: 10.5px; color: var(--sub); margin-top: 8px; line-height: 1.5; }
   .radio2 { display: flex; gap: 12px; font-size: 12px; margin-bottom: 8px; }
   .radio2 label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-  #sizeGuard { font-size: 11px; margin-top: 6px; }
   @media (max-width: 760px) {
     #app { flex-direction: column; }
     #viewport { flex: 0 0 44%; }
     #panel { width: 100%; flex: 1; border-left: none; border-top: 1px solid #2c3948; }
     .row input[type=range] { height: 28px; }   /* タッチの当たり判定を拡大 */
     .check, select, button { min-height: 32px; }
+    .brand .tag { display: none; }
   }
 </style>
 <script type="importmap">
@@ -89,12 +101,15 @@
 </script>
 </head>
 <body>
+<header id="topbar">
+  <div class="brand">🎣 lureworld<span class="tag">ブラウザでルアーをデザインして、3Dプリントで実釣へ</span></div>
+  <nav>
+    <a href="gallery.html">🌏 ギャラリー</a>
+  </nav>
+</header>
 <div id="app">
   <div id="viewport"></div>
   <div id="panel">
-    <h1>🎣 ルアーデザイナー</h1>
-    <div class="sub">Phase 0 技術スパイク — パラメトリック形状生成 / 浮力計算 / STL出力</div>
-
     <div class="section">
       <h2>テンプレート</h2>
       <select id="preset"></select>
@@ -153,6 +168,7 @@
       <div class="row"><label>模様の色</label><input type="color" id="cPatColor"></div>
       <div class="row"><label>模様の濃さ</label><input type="range" id="cPatAlpha" min="0.05" max="1" step="0.01"><span class="val" id="val-cPatAlpha"></span></div>
       <div class="row"><label>目玉の色</label><input type="color" id="cEye"></div>
+      <div id="eyeControls"></div>
       <div class="note">UV展開した2Dテンプレートにレイヤー描画し、3Dへリアルタイム反映。塗り設定はJSONとして保存可能(SPEC 3.3 / paint_json)。</div>
     </div>
 
@@ -218,7 +234,6 @@
       <button id="dlBtn">⬇ STLダウンロード</button>
       <button id="lipStlBtn" style="width:100%;margin-top:8px;display:none">⬇ リップ単体STL (平置き印刷用)</button>
       <button id="lipSvgBtn" style="width:100%;margin-top:8px;display:none">📐 リップ型紙 (SVG / ポリカ板切り出し用)</button>
-      <div id="sizeGuard"></div>
       <div class="note">単位: mm / 空洞入りボディ+リップの2シェル構成。スライスは壁3周・インフィル50%以上を推奨(ヒートン保持力)。左右分割・ウェイトチャンバー・ヒートン下穴は次スパイク。</div>
     </div>
 
@@ -268,6 +283,11 @@ const PARAM_DEFS = {
     { key: 'jointT',   label: '分割位置',         min: 0.52, max: 0.8, step: 0.01, def: 0.62 },
     { key: 'jointGap', label: '隙間 (mm)',        min: 1,    max: 4,   step: 0.1,  def: 2 },
   ],
+  eye: [
+    { key: 'eyePos',   label: '目の位置(前後)',   min: 0.06, max: 0.4, step: 0.005, def: 0.16 },
+    { key: 'eyeUp',    label: '目の高さ',         min: -0.2, max: 0.8, step: 0.01,  def: 0.35 },
+    { key: 'eyeSize',  label: '目の大きさ',       min: 0.5,  max: 2,   step: 0.05,  def: 1 },
+  ],
 };
 
 const PRESETS = {
@@ -293,7 +313,6 @@ state.jointOn = false;
 const PETG_DENSITY = 1.27;   // g/cm3
 const WALL_MM = 1.2;         // 0.4mmノズル×3周
 const LIP_THICK = 1.6;       // mm
-const P1S_BED = 256;         // mm
 
 // ヒートン隔壁(バルクヘッド)。SPEC 3.4「くさび形テーパー隔壁」参照
 const HEATON_BELLY_T = 0.45;  // 腹ヒートン位置(全長比)
@@ -952,17 +971,25 @@ function rebuild() {
 }
 
 function addDressing(s) {
-  const pEye = profile(0.16, s.peak, s.noseFull, s.tailFull);
+  const pEye = profile(s.eyePos, s.peak, s.noseFull, s.tailFull);
   const hw = (s.width / 2) * pEye;
-  const ey = s.height * s.balance * pEye * 0.35;
-  const eyeR = Math.max(1, s.height * 0.09);
+  const hTopE = s.height * s.balance * pEye;
+  const hBotE = s.height * (1 - s.balance) * pEye;
+  const hRef = s.eyeUp >= 0 ? hTopE : hBotE;
+  const ey = hRef * s.eyeUp;
+  // 断面(スーパー楕円)から目の高さでの半幅を逆算し、表面に沿わせる
+  const e = 2 / s.section;
+  const sv = Math.pow(Math.min(Math.abs(ey) / Math.max(hRef, 0.01), 0.98), 1 / e);
+  const zHalf = hw * Math.pow(Math.max(1 - sv * sv, 0.0001), e / 2);
+  const eyeR = Math.max(0.6, s.height * 0.09 * s.eyeSize);
+  const ex = s.length * s.eyePos;
   for (const side of [1, -1]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 16, 12), eyeMat);
-    eye.position.set(s.length * 0.16, ey, side * hw * 0.92);
+    eye.position.set(ex, ey, side * zHalf * 0.97);
     eye.scale.z = 0.45;
     lureGroup.add(eye);
     const pupil = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.5, 12, 10), pupilMat);
-    pupil.position.set(s.length * 0.16, ey, side * (hw * 0.92 + eyeR * 0.35));
+    pupil.position.set(ex, ey, side * (zHalf * 0.97 + eyeR * 0.35));
     pupil.scale.z = 0.35;
     lureGroup.add(pupil);
   }
@@ -1027,13 +1054,6 @@ function updateStats(genMs) {
   if (ratio < 0.97) { badge.textContent = `フローティング (浮力余裕 ${fmt(dispW - totalW)} g)`; badge.style.color = 'var(--ok)'; }
   else if (ratio <= 1.03) { badge.textContent = 'サスペンド (ほぼ中性浮力)'; badge.style.color = 'var(--warn)'; }
   else { badge.textContent = `シンキング (超過 ${fmt(totalW - dispW)} g)`; badge.style.color = 'var(--ng)'; }
-
-  const guard = document.getElementById('sizeGuard');
-  // 別体リップは印刷物に含まれないため造形寸法から除外
-  const maxDim = state.length + (state.lipOn && state.lipMode !== 'separate' ? state.lipLen : 0);
-  guard.innerHTML = maxDim <= P1S_BED
-    ? `<span style="color:var(--ok)">✔ P1S 造形範囲内 (最大寸法 約${fmt(maxDim, 0)}mm / ${P1S_BED}mm)</span>`
-    : `<span style="color:var(--ng)">✖ P1S 造形範囲超過</span>`;
 
   updateAction(totalW, ballast);
 }
@@ -1160,6 +1180,7 @@ buildControls(PARAM_DEFS.body, 'bodyControls');
 buildControls(PARAM_DEFS.lip, 'lipControls');
 buildControls(PARAM_DEFS.cup, 'cupControls');
 buildControls(PARAM_DEFS.joint, 'jointControls');
+buildControls(PARAM_DEFS.eye, 'eyeControls');
 
 document.getElementById('lipOn').addEventListener('change', e => { state.lipOn = e.target.checked; rebuild(); });
 document.getElementById('cupOn').addEventListener('change', e => { state.cupOn = e.target.checked; rebuild(); });
@@ -1402,6 +1423,12 @@ function applyDesign(params, paintJson) {
   // 機能追加前の保存データに無いキーは既定値へ戻す
   if (!('cupOn' in params)) { state.cupOn = false; $('cupOn').checked = false; }
   if (!('jointOn' in params)) { state.jointOn = false; $('jointOn').checked = false; }
+  for (const g of Object.values(PARAM_DEFS)) for (const p of g) {
+    if (p.key in params) continue;
+    state[p.key] = p.def;
+    const slider = document.querySelector(`input[data-key=${p.key}]`);
+    if (slider) { slider.value = p.def; $(`val-${p.key}`).textContent = p.def; }
+  }
   if (!('lipMode' in params)) {
     state.lipMode = 'integrated';
     document.querySelector('input[name=lipMode][value=integrated]').checked = true;
