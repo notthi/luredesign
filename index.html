@@ -213,7 +213,13 @@
           <button id="logoutBtn">ログアウト</button>
         </div>
         <div class="row"><label>デザイン名</label><input type="text" id="designName" placeholder="無題のルアー" maxlength="60"></div>
-        <label class="check"><input type="checkbox" id="isPublic"> ギャラリーに公開する</label>
+        <div class="row"><label>公開設定</label>
+          <select id="visibility" style="flex:1;width:auto">
+            <option value="private">非公開(自分のみ)</option>
+            <option value="unlisted">限定公開(リンクを知る人のみ)</option>
+            <option value="public">ギャラリーに公開</option>
+          </select>
+        </div>
         <div class="row">
           <button id="saveBtn" style="flex:1;background:var(--accent);color:#06283c;font-weight:bold;border:none">💾 保存</button>
           <button id="newBtn">新規</button>
@@ -234,6 +240,7 @@
       <button id="dlBtn">⬇ STLダウンロード</button>
       <button id="lipStlBtn" style="width:100%;margin-top:8px;display:none">⬇ リップ単体STL (平置き印刷用)</button>
       <button id="lipSvgBtn" style="width:100%;margin-top:8px;display:none">📐 リップ型紙 (SVG / ポリカ板切り出し用)</button>
+      <button id="orderBtn" style="width:100%;margin-top:8px">🧾 注文確認シート画像 (プリント依頼用)</button>
       <div class="note">単位: mm / 空洞入りボディ+リップの2シェル構成。スライスは壁3周・インフィル50%以上を推奨(ヒートン保持力)。左右分割・ウェイトチャンバー・ヒートン下穴は次スパイク。</div>
     </div>
 
@@ -1244,6 +1251,172 @@ document.getElementById('lipSvgBtn').addEventListener('click', exportLipSVG);
 document.getElementById('lipStlBtn').addEventListener('click', exportLipSTL);
 updateLipModeUI();
 
+/* ---- 注文確認シート(BASE等での取り違え防止用PNG) ---- */
+
+const PATTERN_LABEL = { none: 'なし', scale: 'ウロコ', dot: 'ドット', stripe: 'タイガー縞' };
+
+function buildOrderSheet() {
+  const s = state;
+  const W = 1200, H = 800;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+
+  // ヘッダー帯
+  ctx.fillStyle = '#10151c';
+  ctx.fillRect(0, 0, W, 64);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 26px "Hiragino Sans", "Yu Gothic", sans-serif';
+  ctx.fillText('🎣 lureworld 注文確認シート', 24, 42);
+  ctx.font = '15px "Hiragino Sans", "Yu Gothic", sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(`作成: ${new Date().toLocaleString('ja-JP')}`, W - 24, 40);
+  ctx.textAlign = 'left';
+
+  // 3Dスナップショット(現在のビュー)
+  renderer.render(scene, camera);
+  const src = renderer.domElement;
+  const box = { x: 24, y: 88, w: 560, h: 360 };
+  ctx.fillStyle = '#10151c';
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+  const sc = Math.min(box.w / src.width, box.h / src.height);
+  const dw = src.width * sc, dh = src.height * sc;
+  ctx.drawImage(src, box.x + (box.w - dw) / 2, box.y + (box.h - dh) / 2, dw, dh);
+  ctx.strokeStyle = '#94a3b3';
+  ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w, box.h);
+
+  // カラー情報(スナップショット下)
+  let cy = box.y + box.h + 34;
+  ctx.fillStyle = '#111111';
+  ctx.font = 'bold 17px "Hiragino Sans", "Yu Gothic", sans-serif';
+  ctx.fillText('カラー(完成イメージ / 出力は無塗装)', box.x, cy);
+  cy += 14;
+  const swatches = [['ベース', paint.base]];
+  if (paint.backOn) swatches.push(['背中', paint.back]);
+  if (paint.headOn) swatches.push(['ヘッド', paint.head]);
+  if (paint.pattern !== 'none') swatches.push(['模様色', paint.patColor]);
+  swatches.push(['目玉', paint.eye]);
+  let sx = box.x;
+  ctx.font = '14px "Hiragino Sans", "Yu Gothic", sans-serif';
+  for (const [label, hex] of swatches) {
+    ctx.fillStyle = hex;
+    ctx.fillRect(sx, cy, 26, 26);
+    ctx.strokeStyle = '#666';
+    ctx.strokeRect(sx + 0.5, cy + 0.5, 26, 26);
+    ctx.fillStyle = '#111111';
+    ctx.fillText(`${label} ${hex}`, sx + 32, cy + 18);
+    sx += 32 + ctx.measureText(`${label} ${hex}`).width + 22;
+  }
+  cy += 48;
+  ctx.fillStyle = '#111111';
+  ctx.fillText(`模様: ${PATTERN_LABEL[paint.pattern] ?? paint.pattern}${paint.pattern !== 'none' ? `(濃さ${paint.patAlpha})` : ''}`, box.x, cy);
+
+  // 右カラム: デザイン情報
+  const rx = 620;
+  let ry = 110;
+  const type = s.cupOn ? 'ポッパー' : !s.lipOn ? 'ペンシル・トップ' : s.lipAngle >= 45 ? 'クランク' : 'ミノー';
+  ctx.fillStyle = '#111111';
+  ctx.font = 'bold 24px "Hiragino Sans", "Yu Gothic", sans-serif';
+  ctx.fillText(($('designName').value.trim() || '無題のルアー').slice(0, 24), rx, ry);
+  ry += 30;
+  ctx.font = '15px "Hiragino Sans", "Yu Gothic", sans-serif';
+  ctx.fillStyle = '#555555';
+  ctx.fillText(`作者: ${session ? (session.user.user_metadata?.name || session.user.email) : '(未ログイン)'}`, rx, ry);
+  ry += 36;
+
+  ctx.fillStyle = '#111111';
+  ctx.font = '18px "Hiragino Sans", "Yu Gothic", sans-serif';
+  const lipLabel = !s.lipOn ? 'なし'
+    : `${s.lipLen}×${s.lipWidth}mm ${s.lipAngle}° (${s.lipMode === 'separate' ? '別体ポリカ板' : '一体プリント'})`;
+  const lines = [
+    `タイプ: ${type}${s.jointOn ? ' (ジョイント)' : ''}`,
+    `寸法: 全長${s.length}mm × 高${s.height}mm × 幅${s.width}mm`,
+    `リップ: ${lipLabel}`,
+    `カップ: ${s.cupOn ? `あり (開口${s.cupOpen} / 深さ${s.cupDepth}mm / 傾き${s.cupSlant}°)` : 'なし'}`,
+    `ジョイント: ${s.jointOn ? `あり (位置${Math.round(s.jointT * 100)}% / 隙間${s.jointGap}mm)` : 'なし'}`,
+    `ウェイト指定: ${$('ballast').value} g (${document.querySelector('input[name=water]:checked').value === '1.025' ? '海水' : '淡水'})`,
+    `浮力(計算): ${$('buoyBadge').innerText}`,
+  ];
+  for (const ln of lines) { ctx.fillText(ln, rx, ry); ry += 33; }
+
+  // デザインID・URL
+  ry += 10;
+  ctx.fillStyle = '#eef2f6';
+  ctx.fillRect(rx - 12, ry - 22, W - rx - 24 + 12, 96);
+  ctx.strokeStyle = '#94a3b3';
+  ctx.strokeRect(rx - 12 + 0.5, ry - 22 + 0.5, W - rx - 24 + 12, 96);
+  ctx.fillStyle = '#111111';
+  ctx.font = 'bold 15px "Hiragino Sans", "Yu Gothic", sans-serif';
+  if (currentDesignId) {
+    ctx.fillText('デザインID(取り違え防止用):', rx, ry);
+    ry += 24;
+    ctx.font = '13px monospace';
+    ctx.fillText(currentDesignId, rx, ry);
+    ry += 24;
+    const url = `https://notthi.github.io/luredesign/?design=${currentDesignId}`;
+    ctx.fillText(url, rx, ry);
+    if ($('visibility').value === 'private') {
+      ry += 22;
+      ctx.fillStyle = '#c22';
+      ctx.font = '13px "Hiragino Sans", "Yu Gothic", sans-serif';
+      ctx.fillText('※ 非公開デザイン。注文時は「限定公開」か「ギャラリーに公開」にして保存すること', rx, ry);
+    }
+  } else {
+    ctx.fillStyle = '#c22';
+    ctx.fillText('※ 未保存のためデザインIDなし。保存すると確認用IDとURLが付く(推奨)', rx, ry);
+  }
+
+  // フッター注意書き
+  ctx.fillStyle = '#f4f6f8';
+  ctx.fillRect(0, H - 92, W, 92);
+  ctx.fillStyle = '#555555';
+  ctx.font = '13px "Hiragino Sans", "Yu Gothic", sans-serif';
+  const notes = [
+    '・この画像を注文時のメッセージ/備考に添付し、注文者と製作者の双方でデザインを確認する。',
+    '・出力は無塗装。カラーは完成イメージ/塗装ガイドとして扱う。',
+    '・浮力・アクションは形状データからの推定値であり、実物とは異なる場合がある。',
+  ];
+  let ny = H - 64;
+  for (const n of notes) { ctx.fillText(n, 24, ny); ny += 22; }
+
+  return c;
+}
+
+function showOrderSheet() {
+  const c = buildOrderSheet();
+  let ov = document.getElementById('orderOverlay');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'orderOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(5,8,12,0.8);z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px';
+  const img = document.createElement('img');
+  img.src = c.toDataURL('image/png');
+  img.style.cssText = 'max-width:min(92vw,900px);max-height:74vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.5)';
+  const btns = document.createElement('div');
+  btns.style.cssText = 'display:flex;gap:10px';
+  const dl = document.createElement('button');
+  dl.textContent = '⬇ 画像を保存';
+  dl.style.cssText = 'background:var(--accent);color:#06283c;font-weight:bold;border:none;padding:10px 18px;border-radius:8px;cursor:pointer';
+  dl.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = img.src;
+    a.download = `lureworld_order_${(currentDesignId || 'draft').slice(0, 8)}.png`;
+    a.click();
+  });
+  const close = document.createElement('button');
+  close.textContent = '閉じる';
+  close.style.cssText = 'background:#2c3948;color:var(--text);border:1px solid #3d4d61;padding:10px 18px;border-radius:8px;cursor:pointer';
+  close.addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  btns.append(dl, close);
+  ov.append(img, btns);
+  document.body.appendChild(ov);
+}
+document.getElementById('orderBtn').addEventListener('click', showOrderSheet);
+
 /* ---- カラーUI ---- */
 const PAINT_INPUTS = [
   ['cBase', 'base', 'color'], ['cBackOn', 'backOn', 'check'], ['cBack', 'back', 'color'],
@@ -1352,7 +1525,8 @@ function captureThumb() {
 
 async function saveDesign() {
   const d = collectDesign();
-  d.is_public = $('isPublic').checked;
+  d.is_public = $('visibility').value === 'public';
+  d.unlisted = $('visibility').value === 'unlisted';
   const thumb = captureThumb();
   if (thumb) d.thumb = thumb;
   if (!currentDesignId && remixSourceId) d.remix_of = remixSourceId;
@@ -1365,13 +1539,13 @@ async function saveDesign() {
   remixSourceId = null;
   $('remixNote').style.display = 'none';
   $('designName').value = d.name;
-  cloudMsg(`「${d.name}」を保存した${d.is_public ? '(ギャラリーに公開中)' : ''}`);
+  cloudMsg(`「${d.name}」を保存した${d.is_public ? '(ギャラリーに公開中)' : d.unlisted ? '(限定公開: リンクを知る人のみ)' : ''}`);
   refreshDesignList();
 }
 
 async function refreshDesignList() {
   const { data, error } = await supabase
-    .from('designs').select('id,name,updated_at,is_public')
+    .from('designs').select('id,name,updated_at,is_public,unlisted')
     .eq('user_id', session.user.id)
     .order('updated_at', { ascending: false });
   if (error) { cloudMsg(`一覧の取得に失敗: ${error.message}`); return; }
@@ -1380,7 +1554,8 @@ async function refreshDesignList() {
   for (const d of data) {
     const opt = document.createElement('option');
     opt.value = d.id;
-    opt.textContent = `${d.is_public ? '🌏 ' : ''}${d.name}  (${new Date(d.updated_at).toLocaleDateString('ja-JP')})`;
+    const mark = d.is_public ? '🌏 ' : d.unlisted ? '🔗 ' : '';
+    opt.textContent = `${mark}${d.name}  (${new Date(d.updated_at).toLocaleDateString('ja-JP')})`;
     sel.appendChild(opt);
   }
 }
@@ -1405,7 +1580,7 @@ function resolveUrlDesignOwnership() {
   if (session && d.user_id === session.user.id) {
     currentDesignId = d.id;
     remixSourceId = null;
-    $('isPublic').checked = !!d.is_public;
+    $('visibility').value = d.is_public ? 'public' : d.unlisted ? 'unlisted' : 'private';
     $('remixNote').style.display = 'none';
     cloudMsg(`「${d.name}」を編集中`);
   } else {
@@ -1468,7 +1643,7 @@ $('newBtn').addEventListener('click', () => {
   remixSourceId = null;
   loadedFromUrl = null;
   $('designName').value = '';
-  $('isPublic').checked = false;
+  $('visibility').value = 'private';
   $('remixNote').style.display = 'none';
   cloudMsg('新規デザイン(次の保存で新しい行になる)');
 });
@@ -1481,7 +1656,7 @@ $('loadBtn').addEventListener('click', async () => {
   remixSourceId = null;
   loadedFromUrl = null;
   $('designName').value = data.name;
-  $('isPublic').checked = !!data.is_public;
+  $('visibility').value = data.is_public ? 'public' : data.unlisted ? 'unlisted' : 'private';
   $('remixNote').style.display = 'none';
   applyDesign(data.params_json, data.paint_json);
   cloudMsg(`「${data.name}」を開いた`);
