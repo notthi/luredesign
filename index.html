@@ -153,7 +153,7 @@
       <h2>内部構造</h2>
       <label class="check"><input type="checkbox" id="hollowOn" checked> 中空化(薄殻+ヒートン隔壁)</label>
       <label class="check"><input type="checkbox" id="cutaway"> 断面表示(内部を確認)</label>
-      <div class="note">ノーズ・テールのソリッド栓と、腹ヒートン位置(全長45%)のくさび形隔壁(腹側5mm厚→背中側1.4mm)にヒートン(ネジ式アイ)をねじ込む。隔壁は全周が殻に接続するためサポートレスで印刷可。下穴の自動配置は次スパイクで実装。</div>
+      <div class="note">ノーズ・テールのソリッド栓と、腹ヒートン位置(全長45%)のくさび形隔壁(腹側5mm厚→背中側1.4mm)にヒートン(ネジ式アイ)をねじ込む。隔壁は全周が殻に接続するためサポートレスで印刷可。3点のヒートン位置には目印の凹み(半径0.75mm)をSTLに自動生成。下穴の完全自動配置(径・深さ指定)は次スパイク。</div>
     </div>
 
     <div class="section">
@@ -231,8 +231,8 @@ import { createClient } from '@supabase/supabase-js';
 // CSG(リップスリット掘り込み用)。CDN障害時はスリット無しで動作継続する
 let csg = null;
 import('three-bvh-csg')
-  .then(m => { csg = m; if (state.lipOn && state.lipMode === 'separate') rebuild(); })
-  .catch(e => console.warn('three-bvh-csg の読み込みに失敗。スリット生成は無効:', e));
+  .then(m => { csg = m; applyCarvedGeometry(); })
+  .catch(e => console.warn('three-bvh-csg の読み込みに失敗。目印・スリット生成は無効:', e));
 
 /* ================= パラメータ定義 ================= */
 
@@ -288,6 +288,7 @@ const HEATON_BELLY_T = 0.45;  // 腹ヒートン位置(全長比)
 const BULKHEAD_T = 5;         // 隔壁の腹側厚(mm) = ねじ込みゾーン
 const BULKHEAD_TOP_T = 1.4;   // 隔壁の背中側最薄厚(mm)。0.4mmノズル3周+マージン
 const SCREW_ZONE_MM = 10;     // 腹側からこの高さまでは全厚を保つ
+const DIMPLE_R = 0.75;        // ヒートン位置の目印凹み(半球)の半径(mm)
 
 // アクション目安の係数。実機テスト(印刷→泳がせて観察)の結果を積み重ねてここを調整する。
 // デザインデータとは独立に管理し、係数を変えても保存済みデザインは影響を受けない。
@@ -623,23 +624,58 @@ function buildLipSlitGeometry(s) {
   return geo;
 }
 
-function subtractLipSlit(outerGeo, s) {
+// ヒートン位置の目印凹み(半球) + 別体リップ時の差し込みスリット を1回のCSGで掘る
+function carveBodyDetails(outerGeo, s) {
   if (!csg) return outerGeo;
+  const tools = [];
+  const pB = profile(HEATON_BELLY_T, s.peak, s.noseFull, s.tailFull);
+  const spots = [
+    [s.cupOn ? cupRimT(s) * s.length + cupDepthMm(s) : 0, 0],        // ノーズ(カップ時はカップ底中央)
+    [HEATON_BELLY_T * s.length, -s.height * (1 - s.balance) * pB],   // 腹(隔壁位置)
+    [s.length, 0],                                                    // テール
+  ];
+  for (const [x, y] of spots) {
+    const g = new THREE.SphereGeometry(DIMPLE_R, 12, 8);
+    g.translate(x, y, 0);   // 表面上に中心を置く=深さ半径ぶんの半球凹み
+    tools.push(g);
+  }
+  if (s.lipOn && s.lipMode === 'separate') tools.push(buildLipSlitGeometry(s));
   try {
-    const slitGeo = buildLipSlitGeometry(s);
+    const toolGeo = mergeGeometries(tools);
     const ev = new csg.Evaluator();
     ev.attributes = ['position', 'normal', 'uv'];
     const a = new csg.Brush(outerGeo);
-    const b = new csg.Brush(slitGeo);
+    const b = new csg.Brush(toolGeo);
     a.updateMatrixWorld();
     b.updateMatrixWorld();
     const out = ev.evaluate(a, b, csg.SUBTRACTION).geometry;
-    slitGeo.dispose();
+    toolGeo.dispose();
     return out;
   } catch (e) {
-    console.warn('リップスリットの生成に失敗。スリット無しで継続:', e);
+    console.warn('目印・スリットの彫り込みに失敗。素の形状で継続:', e);
     return outerGeo;
   }
+}
+
+// CSGは重いので操作が落ち着いてから適用する(rebuildから150msデバウンス)
+let carveTimer = 0;
+function applyCarvedGeometry() {
+  if (!csg || !bodyMesh) return;
+  const s = state;
+  const outerGeo = buildBodyGeometry(s);
+  const shellGeo = carveBodyDetails(outerGeo, s);
+  if (shellGeo === outerGeo) { outerGeo.dispose(); return; }   // CSG不可なら現状維持
+  const cavGeo = s.hollow ? buildCavityGeometry(s) : null;
+  const bodyGeo = cavGeo
+    ? mergeGeometries([
+        shellGeo.index ? shellGeo.toNonIndexed() : shellGeo,
+        cavGeo.index ? cavGeo.toNonIndexed() : cavGeo,
+      ])
+    : shellGeo;
+  bodyMesh.geometry.dispose();
+  bodyMesh.geometry = bodyGeo;
+  outerGeo.dispose();
+  cavGeo?.dispose();
 }
 
 /* ================= 計測(体積・表面積) ================= */
@@ -826,15 +862,8 @@ function rebuild() {
 
   const s = state;
   const outerGeo = buildBodyGeometry(s);
-  // 別体リップ時はアゴ下に差し込みスリットを掘る(表示・STL共通)
-  const shellGeo = (s.lipOn && s.lipMode === 'separate') ? subtractLipSlit(outerGeo, s) : outerGeo;
   const cavGeo = s.hollow ? buildCavityGeometry(s) : null;
-  // CSG結果は非インデックス形式のため、merge時はインデックス形式を揃える
-  const bodyGeo = cavGeo
-    ? mergeGeometries(!!shellGeo.index === !!cavGeo.index
-        ? [shellGeo, cavGeo]
-        : [shellGeo.index ? shellGeo.toNonIndexed() : shellGeo, cavGeo.index ? cavGeo.toNonIndexed() : cavGeo])
-    : shellGeo;
+  const bodyGeo = cavGeo ? mergeGeometries([outerGeo, cavGeo]) : outerGeo;
   bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
   lureGroup.add(bodyMesh);
 
@@ -858,6 +887,9 @@ function rebuild() {
   lastMeasure = { dispMm3, matMm3 };
   updateStats(performance.now() - t0);
   updateLipModeUI();
+  // 目印凹み・スリットの彫り込み(CSG)は操作が落ち着いてから適用
+  clearTimeout(carveTimer);
+  carveTimer = setTimeout(applyCarvedGeometry, 150);
 }
 
 function addDressing(s) {
@@ -1016,6 +1048,9 @@ function writeBinarySTL(geometries, filename) {
 }
 
 function exportSTL() {
+  // デバウンス待ちでも彫り込み(目印・スリット)を確実に反映してから書き出す
+  clearTimeout(carveTimer);
+  applyCarvedGeometry();
   // 別体リップ時はボディSTLにリップを含めない(リップ単体STL or 型紙SVGで別途)
   const meshes = [bodyMesh, state.lipMode === 'separate' ? null : lipMesh].filter(Boolean);
   writeBinarySTL(meshes.map(m => m.geometry), `lure_${state.length}mm.stl`);
