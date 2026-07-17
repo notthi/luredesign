@@ -271,10 +271,11 @@ const PARAM_DEFS = {
     { key: 'height',   label: 'ボディ高 (mm)',    min: 4,   max: 34,  step: 0.5,  def: 14 },
     { key: 'width',    label: 'ボディ幅 (mm)',    min: 3,   max: 26,  step: 0.5,  def: 10 },
     { key: 'peak',     label: '張りの位置',       min: 0.2, max: 0.7, step: 0.01, def: 0.38 },
-    { key: 'noseFull', label: 'ヘッドの張り',     min: 0.35,max: 2.2, step: 0.01, def: 0.9 },
-    { key: 'tailFull', label: 'テールの絞り',     min: 0.35,max: 2.2, step: 0.01, def: 1.35 },
+    { key: 'noseFull', label: 'ヘッドの張り',     min: 0.15,max: 2.2, step: 0.01, def: 0.9 },
+    { key: 'tailFull', label: 'テールの絞り',     min: 0.15,max: 2.2, step: 0.01, def: 1.35 },
     { key: 'balance',  label: '背腹バランス',     min: 0.3, max: 0.7, step: 0.01, def: 0.48 },
     { key: 'section',  label: '断面(丸⇔角)',    min: 1.8, max: 5.0, step: 0.05, def: 2.3 },
+    { key: 'tailFlat', label: 'テール端面 (mm)',  min: 0,   max: 5,   step: 0.1,  def: 1.5 },
   ],
   lip: [
     { key: 'lipLen',   label: '長さ (mm)',        min: 4,  max: 30, step: 0.5, def: 12 },
@@ -376,10 +377,18 @@ function buildBodyGeometry(s) {
   const tJf = jointOn ? jointTf(s) : 1;
   const tJr = jointOn ? jointTr(s) : 1;
 
+  // テール端面: 縦置き印刷の接地とテールヒートンの座面用に、末端をフラットに残す
+  const tailFlatP = s.tailFlat > 0 ? Math.min(s.tailFlat / s.height, 0.5) : 0;
+
   // リング1周を追加して先頭頂点indexを返す。qで断面をスケール、xFixedでx座標を固定
   // j=R は j=0 と同一座標(UVのみ1.0)。テクスチャの継ぎ目は目立たない腹側中央に置く
   function addRing(t, q = 1, xFixed = null) {
-    const p = profile(t, s.peak, s.noseFull, s.tailFull);
+    let p = profile(t, s.peak, s.noseFull, s.tailFull);
+    // テール端面: テール側カーブ全体を[端面サイズ,1]へ再マップする。
+    // ヘッドの張りと同じく「絞り」の指数がそのまま端面までの痩せ方を決める(くびれ・スタブなし)
+    if (tailFlatP > 0 && t > s.peak) {
+      p = tailFlatP + (1 - tailFlatP) * p;
+    }
     // 端は完全に0だと縮退するので極小半径でクランプ→ポールで閉じる
     const pc = Math.max(p, 0.004);
     const hTop = s.height * s.balance * pc * q;
@@ -462,6 +471,8 @@ function buildBodyGeometry(s) {
   const stripA = [...cupRings, ...bodyRingsA];
   // ジョイント時は垂直の平面カットで閉じる(同心リングを縮小するフラットキャップ)
   if (jointOn) for (let k = CAPK - 1; k >= 1; k--) stripA.push(addRing(tJf, k / CAPK, tJf * L));
+  // テール端面のフラットキャップ(ジョイント無しの場合はこのセグメントが末端)
+  else if (tailFlatP > 0) for (let k = CAPK - 1; k >= 1; k--) stripA.push(addRing(1, k / CAPK, L));
   const frontPoleA = addPole(cupOn ? tRim * L + cupDepth : 0, 0);
   const rearPoleA = addPole(jointOn ? tJf * L : L, jointOn ? tJf : 1);
   stitch(stripA, frontPoleA, rearPoleA);
@@ -473,6 +484,8 @@ function buildBodyGeometry(s) {
     for (let k = 1; k < CAPK; k++) stripB.push(addRing(tJr, k / CAPK, tJr * L));
     const nB = Math.max(Math.round(M * (1 - tJr)), 24);
     for (const t of ringTs(tJr, 1, nB)) stripB.push(addRing(t));
+    // テール端面のフラットキャップ
+    if (tailFlatP > 0) for (let k = CAPK - 1; k >= 1; k--) stripB.push(addRing(1, k / CAPK, L));
     const frontPoleB = addPole(tJr * L, tJr);
     const tailPoleB = addPole(L, 1);
     stitch(stripB, frontPoleB, tailPoleB);
