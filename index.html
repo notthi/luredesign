@@ -265,11 +265,15 @@
 
     <div class="section">
       <h2>出力</h2>
+      <div class="radio2">
+        <label><input type="radio" name="printMode" value="whole" checked> 一体</label>
+        <label><input type="radio" name="printMode" value="halves"> 左右分割(平置き)</label>
+      </div>
       <button id="dlBtn">⬇ STLダウンロード</button>
       <button id="lipStlBtn" style="width:100%;margin-top:8px;display:none">⬇ リップ単体STL (平置き印刷用)</button>
       <button id="lipSvgBtn" style="width:100%;margin-top:8px;display:none">📐 リップ型紙 (SVG / ポリカ板切り出し用)</button>
       <button id="orderBtn" style="width:100%;margin-top:8px">🧾 注文確認シート画像 (プリント依頼用)</button>
-      <div class="note">単位: mm / 空洞入りボディ+リップの2シェル構成。スライスは壁3周・インフィル50%以上を推奨(ヒートン保持力)。左右分割・ウェイトチャンバー・ヒートン下穴は次スパイク。</div>
+      <div class="note">単位: mm / スライスは壁3周・インフィル50%以上を推奨(ヒートン保持力)。<b>左右分割</b>は接着面をベッドに向けた平置き配置で出力され、回転なしでそのままスライス可(サポート不要・接着はエポキシ等)。分割時のリップは自動的に別体扱い(ボディにスリット生成、リップ単体STL/型紙SVGで組み立て)。一体を立てて印刷する場合はラフト+ブリム推奨。位置決めダボ・ウェイトチャンバーは次スパイク。</div>
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--sub);padding:4px 0 12px">
@@ -1190,9 +1194,67 @@ function exportSTL() {
   // デバウンス待ちでも彫り込み(目印・スリット)を確実に反映してから書き出す
   clearTimeout(carveTimer);
   applyCarvedGeometry();
+  const split = document.querySelector('input[name=printMode]:checked')?.value === 'halves';
+  if (split) {
+    if (!csg) { alert('左右分割にはCSGモジュールが必要(読み込み失敗中)。一体で出力するか再読み込みを'); return; }
+    if (state.lipOn && state.lipMode !== 'separate') {
+      alert('左右分割は別体リップ前提(継ぎ目入りの一体リップは強度が出ない)。リップの出力形態を「別体」にしてから出力を');
+      return;
+    }
+    try {
+      writeBinarySTL(exportHalves(), `lure_${state.length}mm_halves.stl`);
+    } catch (e) {
+      console.warn('左右分割の生成に失敗:', e);
+      alert(`左右分割の生成に失敗した: ${e.message ?? e}`);
+    }
+    return;
+  }
   // 別体リップ時はボディSTLにリップを含めない(リップ単体STL or 型紙SVGで別途)
   const meshes = [bodyMesh, state.lipMode === 'separate' ? null : lipMesh].filter(Boolean);
   writeBinarySTL(meshes.map(m => m.geometry), `lure_${state.length}mm.stl`);
+}
+
+// 左右分割: ボディ(+一体リップ)をz=0面(左右対称面)で2分割し、
+// 接着面をベッドに向けた平置き姿勢で並べて返す(スライサーで回転不要・サポートレス)
+function exportHalves() {
+  const s = state;
+  const wBox = Math.max(s.width, s.lipOn ? s.lipWidth : 0) + 20;
+  // 切断面をz=0からごく僅かにずらす。リング頂点が正確にz=0上にあるため、
+  // 共面のままだとCSGが縮退して非対称な結果になる(実害のない1.4µm重複で回避)
+  const eps = 0.0007;
+  const makeBox = side => {
+    const b = new THREE.BoxGeometry(s.length * 3, 400, wBox);
+    b.translate(s.length / 2, 0, side * (wBox / 2) - side * eps);   // side=+1でz>=-eps側、-1でz<=+eps側
+    return b;
+  };
+  const cut = (geo, box, attrs) => {
+    const ev = new csg.Evaluator();
+    ev.attributes = attrs;
+    const a = new csg.Brush(geo);
+    const b = new csg.Brush(box);
+    a.updateMatrixWorld();
+    b.updateMatrixWorld();
+    return ev.evaluate(a, b, csg.INTERSECTION).geometry;
+  };
+
+  // リップは含めない: 薄板の中央に接着継ぎ目が通ると強度が出ないため、
+  // 左右分割では常に別体リップ(ボディ側スリット+リップ単体STL)の構成とする
+  const groupA = [], groupB = [];
+  const boxA = makeBox(1), boxB = makeBox(-1);
+  groupA.push(cut(bodyMesh.geometry, boxA, ['position', 'normal', 'uv']));
+  groupB.push(cut(bodyMesh.geometry, boxB, ['position', 'normal', 'uv']));
+  boxA.dispose();
+  boxB.dispose();
+
+  // 平置き配置: A側は接着面(z=0)が下・ドームが+zで既に印刷向き。
+  // B側は反転してドームを+zへ向け、x位置を戻して、y方向に離して並べる
+  const sepY = s.height + 8;
+  for (const g of groupA) g.translate(0, sepY / 2, 0);
+  for (const g of groupB) {
+    g.rotateY(Math.PI);                    // ドームを+zへ(接着面はz=0のまま)
+    g.translate(s.length, -sepY / 2, 0);   // x範囲を元に戻し、y方向に離して並べる
+  }
+  return [...groupA, ...groupB];
 }
 
 // リップ単体STL: 角度0で生成し直して平置き姿勢(積層がリップ面方向=強度確保)で出力
@@ -1246,6 +1308,16 @@ function updateLipModeUI() {
 document.querySelectorAll('input[name=lipMode]').forEach(r => r.addEventListener('change', () => {
   state.lipMode = document.querySelector('input[name=lipMode]:checked').value;
   rebuild();   // スリットの掘り込み/除去と寸法ガードを反映
+}));
+
+// 左右分割を選んだら一体リップを自動で別体へ切り替える(継ぎ目入りリップを作らせない)
+document.querySelectorAll('input[name=printMode]').forEach(r => r.addEventListener('change', () => {
+  const halves = document.querySelector('input[name=printMode]:checked').value === 'halves';
+  if (halves && state.lipOn && state.lipMode !== 'separate') {
+    state.lipMode = 'separate';
+    document.querySelector('input[name=lipMode][value=separate]').checked = true;
+    rebuild();
+  }
 }));
 
 // リップ型紙SVG(原寸mm)。輪郭は buildLipGeometry の幅プロファイルと同一式
