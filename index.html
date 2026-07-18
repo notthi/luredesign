@@ -560,17 +560,46 @@ function orientOutward(positions, indices, invert = false) {
   }
 }
 
+// リップ断面の共通パラメータ。本体形状・差し込みスリット・型紙SVGの3箇所で
+// 同一の式を共有し、嵌合と型紙の整合を保証する
+const LIP_ATTACH_T = 0.07;   // 取付位置(全長比)
+const LIP_EMBED = 4;         // ボディへの埋め込み量(mm)
+const LIP_BURY = 1.1;        // 取付中心をアゴ面から持ち上げる量(mm)
+function lipParams(s) {
+  const embed = LIP_EMBED;
+  const len = s.lipLen + embed;
+  const tipHW = s.lipWidth / 2;
+  const p = profile(LIP_ATTACH_T, s.peak, s.noseFull, s.tailFull);
+  const yBot = -s.height * (1 - s.balance) * p;
+  // 根元幅: アゴ幅に合わせるが、埋め込み位置でのボディ実幅を超えない
+  // (超えると根元がボディ側面からはみ出し、接合部に隙間ができる)
+  const e = 2 / s.section;
+  const tR = LIP_ATTACH_T + (embed * 0.6) / s.length;
+  const pR = profile(tR, s.peak, s.noseFull, s.tailFull);
+  const hBotR = Math.max(s.height * (1 - s.balance) * pR, 0.05);
+  const hwR = (s.width / 2) * pR;
+  const yC = Math.min(Math.abs(yBot + LIP_BURY), hBotR * 0.98);   // 埋め込み中心の深さ(中心線基準)
+  const sv = Math.pow(yC / hBotR, 1 / e);
+  const zAvail = hwR * Math.pow(Math.max(1 - sv * sv, 0.0001), e / 2);
+  const rootHW = Math.max(Math.min(Math.max((s.width / 2) * p * 0.9, tipHW * 0.5), zAvail * 0.85), 1.2);
+  const tipFrac = Math.min(tipHW / len, 0.35);
+  const hw = u => {
+    let w = rootHW + (tipHW - rootHW) * smoothstep(u / 0.55);      // 根元→板へ
+    if (u > 1 - tipFrac) {                                          // 先端は半円に収束
+      const q = (u - (1 - tipFrac)) / tipFrac;
+      w *= Math.sqrt(Math.max(1 - q * q, 0.0016));
+    }
+    return w;
+  };
+  return { embed, len, tipHW, rootHW, tipFrac, hw, yBot };
+}
+
 function buildLipGeometry(s) {
   // 根元はアゴに馴染む太い断面、先端は薄い板へと連続的に絞るロフト形状
   const U = 40, R = 28;
-  const tipHW = s.lipWidth / 2;
+  const { embed, len, tipHW, rootHW, tipFrac, hw: hwAt, yBot } = lipParams(s);
   const tipHT = LIP_THICK / 2;
-  const tAttach = 0.07;
-  const p = profile(tAttach, s.peak, s.noseFull, s.tailFull);
-  const rootHW = Math.max((s.width / 2) * p * 0.9, tipHW * 0.5);   // 根元幅はアゴ幅に合わせる
-  const embed = 3;                                                  // ボディへの埋め込み量
-  const len = s.lipLen + embed;
-  const tipFrac = Math.min(tipHW / len, 0.35);
+  const tAttach = LIP_ATTACH_T;
 
   // 中心線: 曲げのない平板(リップ角のままの直線)
   const aTip = THREE.MathUtils.degToRad(s.lipAngle);
@@ -587,11 +616,7 @@ function buildLipGeometry(s) {
   const ringStart = [];
   for (let i = 0; i <= U; i++) {
     const u = i / U;
-    let hw = rootHW + (tipHW - rootHW) * smoothstep(u / 0.55);      // 根元→板へ絞る
-    if (u > 1 - tipFrac) {                                          // 先端は半円に収束
-      const q = (u - (1 - tipFrac)) / tipFrac;
-      hw *= Math.sqrt(Math.max(1 - q * q, 0.0016));
-    }
+    const hw = hwAt(u);                                             // 幅プロファイルは共通式(lipParams)
     const ht = tipHT;                                               // 厚みは全長で一定
     const nx = -Math.sin(ca[i]), ny = Math.cos(ca[i]);              // 断面の上方向
     ringStart.push(positions.length / 3);
@@ -628,8 +653,7 @@ function buildLipGeometry(s) {
   geo.computeVertexNormals();
 
   // アゴ下へ取り付け(根元を埋め込んで滑らかに繋げる)
-  const yBot = -s.height * (1 - s.balance) * p;
-  geo.translate(s.length * tAttach + embed * 0.6, yBot + 0.9, 0);
+  geo.translate(s.length * tAttach + embed * 0.6, yBot + LIP_BURY, 0);
   return geo;
 }
 
@@ -731,21 +755,15 @@ function buildCavityGeometry(s) {
 // 別体リップの差し込みスロット。buildLipGeometry と同じ取付原点・角度で、
 // リップ厚+0.25mm / 差し込み部最大幅+0.3mm のボックスをアゴ下に貫通させる
 function buildLipSlitGeometry(s) {
-  const embed = 3;
-  const len = s.lipLen + embed;
-  const tipHW = s.lipWidth / 2;
-  const p = profile(0.07, s.peak, s.noseFull, s.tailFull);
-  const rootHW = Math.max((s.width / 2) * p * 0.9, tipHW * 0.5);
-  const uIns = embed / len;
-  const hwIns = rootHW + (tipHW - rootHW) * smoothstep(uIns / 0.55);   // 差し込み部の最大半幅
+  const { embed, len, hw, yBot } = lipParams(s);   // リップ本体と同一式(嵌合保証)
+  const hwIns = hw(embed / len);                   // 差し込み部の最大半幅
   const a = THREE.MathUtils.degToRad(s.lipAngle);
   const axisLen = embed + 2.5;   // 根元側0.5mm余裕 + 表面側2mm貫通
   const geo = new THREE.BoxGeometry(axisLen, LIP_THICK + 0.25, (hwIns + 0.15) * 2);
   geo.rotateZ(Math.PI + a);      // ローカル+X → リップ軸方向(-cosA, -sinA)
   const dc = axisLen / 2 - 0.5;
-  const yBot = -s.height * (1 - s.balance) * p;
-  const ox = s.length * 0.07 + embed * 0.6;
-  const oy = yBot + 0.9;
+  const ox = s.length * LIP_ATTACH_T + embed * 0.6;
+  const oy = yBot + LIP_BURY;
   geo.translate(ox - Math.cos(a) * dc, oy - Math.sin(a) * dc, 0);
   return geo;
 }
@@ -1323,20 +1341,7 @@ document.querySelectorAll('input[name=printMode]').forEach(r => r.addEventListen
 // リップ型紙SVG(原寸mm)。輪郭は buildLipGeometry の幅プロファイルと同一式
 function exportLipSVG() {
   const s = state;
-  const embed = 3;                       // ボディへの差し込み量(buildLipGeometryと同じ)
-  const len = s.lipLen + embed;
-  const tipHW = s.lipWidth / 2;
-  const p = profile(0.07, s.peak, s.noseFull, s.tailFull);
-  const rootHW = Math.max((s.width / 2) * p * 0.9, tipHW * 0.5);
-  const tipFrac = Math.min(tipHW / len, 0.35);
-  const hw = u => {
-    let w = rootHW + (tipHW - rootHW) * smoothstep(u / 0.55);
-    if (u > 1 - tipFrac) {
-      const q = (u - (1 - tipFrac)) / tipFrac;
-      w *= Math.sqrt(Math.max(1 - q * q, 0.0016));
-    }
-    return w;
-  };
+  const { embed, len, tipHW, rootHW, hw } = lipParams(s);   // リップ本体と同一式
   const N = 80;
   const right = [], left = [];
   for (let i = 0; i <= N; i++) {
