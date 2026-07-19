@@ -661,40 +661,69 @@ function buildLipGeometry(s) {
   return geo;
 }
 
-// 一体リップ用の補強フィレット(尾側の三角ガセット)。
-// 水圧でリップが後方へ曲がるとき応力が集中する「根元上面とアゴの入隅」を
-// リップ上面に沿った楔形の肉で埋めて強度を上げる。一体プリント時のみ生成
+// 一体リップ用の補強フィレット(R1)。
+// リップ上面とアゴ面が作る尾側の入隅に、両面へ接する半径R(1mm)の1/4円弧断面を
+// リップ幅方向へ掃引した肉を入れ、応力集中部をなだらかに繋ぐ。一体プリント時のみ生成
+const LIP_FILLET_R = 1.0;
 function buildLipFilletGeometry(s) {
   const { embed, rootHW, yBot } = lipParams(s);
   const a = THREE.MathUtils.degToRad(s.lipAngle);
-  const d = [-Math.cos(a), -Math.sin(a)];    // リップ軸方向(根元→先端)
-  // リップ下面(尾側/腹側)法線。上面(-sin,cos)側は前方へ突き出て体表からはみ出すため、
-  // 体の内側(腹側)へ収まる下面側にフィレットを付ける
-  const n = [Math.sin(a), -Math.cos(a)];
+  const e1 = [-Math.cos(a), -Math.sin(a)];     // リップ上面に沿って先端方向
+  const nUp = [-Math.sin(a), Math.cos(a)];     // リップ上面法線
   const ht = LIP_THICK / 2;
-  const P = [s.length * LIP_ATTACH_T + embed * 0.6, yBot + LIP_BURY];   // 根元中心
+  const P = [s.length * LIP_ATTACH_T + embed * 0.6, yBot + LIP_BURY];
+  const R = LIP_FILLET_R;
 
-  // 三角形断面(直角ガセット): B0(埋め込み側・リップ下面) → B1(露出部のリップ下面)
-  // → B2(B0からリップ下面に垂直へ、体の腹側の肉内へ)。斜辺B1-B2が尾側の見えるフィレット面
-  const fLen = embed + Math.min(4, s.lipLen * 0.45);
-  const B0 = [P[0] + n[0] * ht + d[0] * 1.0, P[1] + n[1] * ht + d[1] * 1.0];
-  const B1 = [P[0] + n[0] * ht + d[0] * fLen, P[1] + n[1] * ht + d[1] * fLen];
-  // ガセット高さ: 腹側へ突き抜けない範囲でクランプ
-  const hBotLocal = s.height * (1 - s.balance) * profile(Math.min(Math.max(B0[0] / s.length, 0.02), 0.5), s.peak, s.noseFull, s.tailFull);
-  let gH = Math.min(2.5, s.height * 0.18);
-  if (n[1] < -0.2) gH = Math.min(gH, Math.max((-hBotLocal * 0.8 - B0[1]) / n[1], 0.6));
-  const B2 = [B0[0] + n[0] * gH, B0[1] + n[1] * gH];
+  // 入隅のコーナー: リップ上面上、アゴ表面から出る少し内側の点(確実に肉に食い込ませる)
+  const uExit = embed * 0.75;
+  const C = [P[0] + nUp[0] * ht + e1[0] * uExit, P[1] + nUp[1] * ht + e1[1] * uExit];
 
-  const w = rootHW * 0.9;   // 幅はリップ根元幅の範囲(ボディ実幅クランプ済み)
+  // アゴ面の接線方向(テール向き)。腹ライン y=-hBot(x) の傾きから数値的に求める
+  const belly = x => -s.height * (1 - s.balance)
+    * profile(Math.min(Math.max(x / s.length, 0.02), 0.6), s.peak, s.noseFull, s.tailFull);
+  const eps = 0.5;
+  const m = (belly(C[0] + eps) - belly(C[0] - eps)) / (2 * eps);
+  const lc = Math.hypot(1, m);
+  const e2 = [1 / lc, m / lc];                 // アゴ面に沿ってテール方向
+
+  // 2辺に接する円弧: 接点はコーナーから t = R/tan(φ/2)、中心は二等分線上 R/sin(φ/2)
+  const cosPhi = Math.min(Math.max(e1[0] * e2[0] + e1[1] * e2[1], -0.999), 0.999);
+  const phi = Math.acos(cosPhi);
+  const t = Math.min(R / Math.tan(phi / 2), 2.5);
+  const T1 = [C[0] + e1[0] * t, C[1] + e1[1] * t];
+  const T2 = [C[0] + e2[0] * t, C[1] + e2[1] * t];
+  const bl = Math.hypot(e1[0] + e2[0], e1[1] + e2[1]) || 1;
+  const bis = [(e1[0] + e2[0]) / bl, (e1[1] + e2[1]) / bl];
+  const O = [C[0] + bis[0] * Math.hypot(t, R), C[1] + bis[1] * Math.hypot(t, R)];
+
+  // 断面ポリゴン: C → T1 → (凹円弧) → T2。円弧が見えるフィレット面になる
+  const a1 = Math.atan2(T1[1] - O[1], T1[0] - O[0]);
+  let da = Math.atan2(T2[1] - O[1], T2[0] - O[0]) - a1;
+  while (da > Math.PI) da -= 2 * Math.PI;
+  while (da < -Math.PI) da += 2 * Math.PI;
+  const SEG = 6;
+  const pts = [C, T1];
+  for (let i = 1; i < SEG; i++) {
+    const ang = a1 + da * (i / SEG);
+    pts.push([O[0] + Math.cos(ang) * R, O[1] + Math.sin(ang) * R]);
+  }
+  pts.push(T2);
+
+  // 断面をリップ幅方向(±z)へ掃引した柱体
+  const w = rootHW * 0.9;
+  const K = pts.length;
   const positions = [];
-  for (const z of [w, -w]) for (const B of [B0, B1, B2]) positions.push(B[0], B[1], z);
-  // 頂点: 0,1,2 = +z側 / 3,4,5 = -z側
-  const indices = [
-    0, 1, 2, 3, 5, 4,          // 両端のキャップ
-    0, 3, 4, 0, 4, 1,          // B0-B1側面
-    1, 4, 5, 1, 5, 2,          // B1-B2側面
-    2, 5, 3, 2, 3, 0,          // B2-B0側面
-  ];
+  for (const z of [w, -w]) for (const p2 of pts) positions.push(p2[0], p2[1], z);
+  const indices = [];
+  for (let i = 1; i < K - 1; i++) {
+    indices.push(0, i, i + 1);              // +z側キャップ(Cを扇の中心に)
+    indices.push(K, K + i + 1, K + i);      // -z側キャップ
+  }
+  for (let i = 0; i < K; i++) {
+    const j = (i + 1) % K;
+    indices.push(i, K + i, K + j);
+    indices.push(i, K + j, j);
+  }
   orientOutward(positions, indices);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
