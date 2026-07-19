@@ -662,67 +662,123 @@ function buildLipGeometry(s) {
 }
 
 // 一体リップ用の補強フィレット(R1)。
-// リップ上面とアゴ面が作る尾側の入隅に、両面へ接する半径R(1mm)の1/4円弧断面を
-// リップ幅方向へ掃引した肉を入れ、応力集中部をなだらかに繋ぐ。一体プリント時のみ生成
+// リップ上面とアゴ曲面の「実際の交線」に沿って断面をスライスごとに計算し、
+// 両面に接する半径Rの円弧断面をロフトする(尾側の入隅を滑らかに繋ぐ)。一体プリント時のみ生成
 const LIP_FILLET_R = 1.0;
+const LIP_FILLET_BIAS = 1.12;   // 断面を弧中心から少し拡大し、両面に確実に食い込ませる
 function buildLipFilletGeometry(s) {
-  const { embed, rootHW, yBot } = lipParams(s);
+  const { embed, len, rootHW, yBot, hw: lipHw } = lipParams(s);
   const a = THREE.MathUtils.degToRad(s.lipAngle);
-  const e1 = [-Math.cos(a), -Math.sin(a)];     // リップ上面に沿って先端方向
+  const d = [-Math.cos(a), -Math.sin(a)];      // リップ軸(根元→先端)
   const nUp = [-Math.sin(a), Math.cos(a)];     // リップ上面法線
   const ht = LIP_THICK / 2;
   const P = [s.length * LIP_ATTACH_T + embed * 0.6, yBot + LIP_BURY];
   const R = LIP_FILLET_R;
+  const eLip = 2 / 2.4;                        // リップ断面の指数(buildLipGeometryと同じ)
+  const eBody = 2 / s.section;
 
-  // 入隅のコーナー: リップ上面上、アゴ表面から出る少し内側の点(確実に肉に食い込ませる)
-  const uExit = embed * 0.75;
-  const C = [P[0] + nUp[0] * ht + e1[0] * uExit, P[1] + nUp[1] * ht + e1[1] * uExit];
+  const clampT = x => Math.min(Math.max(x / s.length, 0.02), 0.6);
+  const hwB = x => (s.width / 2) * profile(clampT(x), s.peak, s.noseFull, s.tailFull);
+  const hBotF = x => s.height * (1 - s.balance) * profile(clampT(x), s.peak, s.noseFull, s.tailFull);
+  // 幅方向オフセットzでの腹面の高さ(ボディ断面スーパー楕円から)
+  const bellyY = (x, z) => {
+    const hb = hwB(x);
+    if (Math.abs(z) >= hb * 0.995) return null;
+    const cu = Math.pow(Math.abs(z) / hb, 1 / eBody);
+    const sv = Math.sqrt(Math.max(1 - cu * cu, 0));
+    return -hBotF(x) * Math.pow(sv, eBody);
+  };
+  // 幅方向オフセットzでのリップ上面高さ(リップ断面スーパー楕円から)
+  const hwJ = lipHw(embed / len);
+  const lipTopOff = z => {
+    if (Math.abs(z) >= hwJ * 0.97) return null;
+    const cu = Math.pow(Math.abs(z) / hwJ, 1 / eLip);
+    const sv = Math.sqrt(Math.max(1 - cu * cu, 0));
+    return ht * Math.pow(sv, eLip);
+  };
 
-  // アゴ面の接線方向(テール向き)。腹ライン y=-hBot(x) の傾きから数値的に求める
-  const belly = x => -s.height * (1 - s.balance)
-    * profile(Math.min(Math.max(x / s.length, 0.02), 0.6), s.peak, s.noseFull, s.tailFull);
-  const eps = 0.5;
-  const m = (belly(C[0] + eps) - belly(C[0] - eps)) / (2 * eps);
-  const lc = Math.hypot(1, m);
-  const e2 = [1 / lc, m / lc];                 // アゴ面に沿ってテール方向
-
-  // 2辺に接する円弧: 接点はコーナーから t = R/tan(φ/2)、中心は二等分線上 R/sin(φ/2)
-  const cosPhi = Math.min(Math.max(e1[0] * e2[0] + e1[1] * e2[1], -0.999), 0.999);
-  const phi = Math.acos(cosPhi);
-  const t = Math.min(R / Math.tan(phi / 2), 2.5);
-  const T1 = [C[0] + e1[0] * t, C[1] + e1[1] * t];
-  const T2 = [C[0] + e2[0] * t, C[1] + e2[1] * t];
-  const bl = Math.hypot(e1[0] + e2[0], e1[1] + e2[1]) || 1;
-  const bis = [(e1[0] + e2[0]) / bl, (e1[1] + e2[1]) / bl];
-  const O = [C[0] + bis[0] * Math.hypot(t, R), C[1] + bis[1] * Math.hypot(t, R)];
-
-  // 断面ポリゴン: C → T1 → (凹円弧) → T2。円弧が見えるフィレット面になる
-  const a1 = Math.atan2(T1[1] - O[1], T1[0] - O[0]);
-  let da = Math.atan2(T2[1] - O[1], T2[0] - O[0]) - a1;
-  while (da > Math.PI) da -= 2 * Math.PI;
-  while (da < -Math.PI) da += 2 * Math.PI;
+  // 1スライス分の断面ポリゴンを計算(交点の実測 + 接線条件の円弧)
   const SEG = 6;
-  const pts = [C, T1];
-  for (let i = 1; i < SEG; i++) {
-    const ang = a1 + da * (i / SEG);
-    pts.push([O[0] + Math.cos(ang) * R, O[1] + Math.sin(ang) * R]);
-  }
-  pts.push(T2);
+  function slicePolygon(z) {
+    const off = lipTopOff(z);
+    if (off === null) return null;
+    const Lx = u => P[0] + nUp[0] * off + d[0] * u;
+    const Ly = u => P[1] + nUp[1] * off + d[1] * u;
+    const f = u => {
+      const yb = bellyY(Lx(u), z);
+      return yb === null ? -1 : Ly(u) - yb;   // 正=ボディ内(腹面より上)、負=外
+    };
+    let uIn = 0.5, uOut = embed + s.lipLen * 0.8;
+    if (f(uIn) <= 0 || f(uOut) > 0) return null;   // このzでは交線が取れない
+    for (let i = 0; i < 32; i++) {
+      const um = (uIn + uOut) / 2;
+      if (f(um) > 0) uIn = um; else uOut = um;
+    }
+    const uC = (uIn + uOut) / 2;
+    const C = [Lx(uC), Ly(uC)];
 
-  // 断面をリップ幅方向(±z)へ掃引した柱体
-  const w = rootHW * 0.9;
-  const K = pts.length;
-  const positions = [];
-  for (const z of [w, -w]) for (const p2 of pts) positions.push(p2[0], p2[1], z);
-  const indices = [];
-  for (let i = 1; i < K - 1; i++) {
-    indices.push(0, i, i + 1);              // +z側キャップ(Cを扇の中心に)
-    indices.push(K, K + i + 1, K + i);      // -z側キャップ
+    // アゴ面の接線(テール向き)を数値微分で求める
+    const eps = 0.4;
+    const y1 = bellyY(C[0] - eps, z), y2 = bellyY(C[0] + eps, z);
+    if (y1 === null || y2 === null) return null;
+    const m = (y2 - y1) / (2 * eps);
+    const lc = Math.hypot(1, m);
+    const e2 = [1 / lc, m / lc];
+    const e1 = d;
+
+    // 2辺に接する円弧: 接点はコーナーから t = R/tan(φ/2)、中心は二等分線上 R/sin(φ/2)
+    const cosPhi = Math.min(Math.max(e1[0] * e2[0] + e1[1] * e2[1], -0.999), 0.999);
+    const phi = Math.acos(cosPhi);
+    const t = Math.min(R / Math.tan(phi / 2), 2.5);
+    const T1 = [C[0] + e1[0] * t, C[1] + e1[1] * t];
+    const T2 = [C[0] + e2[0] * t, C[1] + e2[1] * t];
+    const bl = Math.hypot(e1[0] + e2[0], e1[1] + e2[1]) || 1;
+    const O = [C[0] + (e1[0] + e2[0]) / bl * Math.hypot(t, R), C[1] + (e1[1] + e2[1]) / bl * Math.hypot(t, R)];
+
+    const a1 = Math.atan2(T1[1] - O[1], T1[0] - O[0]);
+    let da = Math.atan2(T2[1] - O[1], T2[0] - O[0]) - a1;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    while (da < -Math.PI) da += 2 * Math.PI;
+    const pts = [C, T1];
+    for (let i = 1; i < SEG; i++) {
+      const ang = a1 + da * (i / SEG);
+      pts.push([O[0] + Math.cos(ang) * R, O[1] + Math.sin(ang) * R]);
+    }
+    pts.push(T2);
+    // 弧中心から少し拡大し、リップ面・アゴ面の内側へ食い込ませる(共面・隙間の回避)
+    return pts.map(p2 => [O[0] + (p2[0] - O[0]) * LIP_FILLET_BIAS, O[1] + (p2[1] - O[1]) * LIP_FILLET_BIAS]);
   }
-  for (let i = 0; i < K; i++) {
-    const j = (i + 1) % K;
-    indices.push(i, K + i, K + j);
-    indices.push(i, K + j, j);
+
+  // 幅方向にスライスして交線に沿ったロフトを作る
+  const wMax = Math.min(hwJ, rootHW) * 0.92;
+  const N = 11;
+  const slices = [];
+  for (let i = 0; i < N; i++) {
+    const z = -wMax + (2 * wMax) * (i / (N - 1));
+    const poly = slicePolygon(z);
+    if (poly) slices.push({ z, poly });
+  }
+  if (slices.length < 2) return null;
+
+  const K = SEG + 2;
+  const S = slices.length;
+  const positions = [];
+  for (const sl of slices) for (const p2 of sl.poly) positions.push(p2[0], p2[1], sl.z);
+  const indices = [];
+  // 側面(隣接スライス間)
+  for (let i = 0; i < S - 1; i++) {
+    const A = i * K, B = (i + 1) * K;
+    for (let k = 0; k < K; k++) {
+      const k2 = (k + 1) % K;
+      indices.push(A + k, B + k, B + k2);
+      indices.push(A + k, B + k2, A + k2);
+    }
+  }
+  // 両端キャップ(コーナーCを扇の中心に)
+  const E = (S - 1) * K;
+  for (let k = 1; k < K - 1; k++) {
+    indices.push(0, k + 1, k);
+    indices.push(E, E + k, E + k + 1);
   }
   orientOutward(positions, indices);
   const geo = new THREE.BufferGeometry();
@@ -1104,9 +1160,11 @@ function rebuild() {
     // 一体プリント時は根元尾側の補強フィレットを付ける(ボディと同じ塗装で表示)
     if (s.lipMode !== 'separate') {
       const filletGeo = buildLipFilletGeometry(s);
-      filletMesh = new THREE.Mesh(filletGeo, bodyMat);
-      lureGroup.add(filletMesh);
-      lipVol += measure(filletGeo).volumeMm3;   // ボディとの重なり分の二重計上は僅少
+      if (filletGeo) {
+        filletMesh = new THREE.Mesh(filletGeo, bodyMat);
+        lureGroup.add(filletMesh);
+        lipVol += measure(filletGeo).volumeMm3;   // ボディとの重なり分の二重計上は僅少
+      }
     }
   }
 
