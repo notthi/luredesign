@@ -668,19 +668,21 @@ function buildLipFilletGeometry(s) {
   const { embed, rootHW, yBot } = lipParams(s);
   const a = THREE.MathUtils.degToRad(s.lipAngle);
   const d = [-Math.cos(a), -Math.sin(a)];    // リップ軸方向(根元→先端)
-  const n = [-Math.sin(a), Math.cos(a)];     // リップ上面法線
+  // リップ下面(尾側/腹側)法線。上面(-sin,cos)側は前方へ突き出て体表からはみ出すため、
+  // 体の内側(腹側)へ収まる下面側にフィレットを付ける
+  const n = [Math.sin(a), -Math.cos(a)];
   const ht = LIP_THICK / 2;
   const P = [s.length * LIP_ATTACH_T + embed * 0.6, yBot + LIP_BURY];   // 根元中心
 
-  // 三角形断面(直角ガセット): B0(埋め込み側・リップ上面) → B1(露出部のリップ上面)
-  // → B2(B0からリップ上面に垂直へ立ち上げ、アゴの肉内)。斜辺B1-B2が尾側の見えるフィレット面
+  // 三角形断面(直角ガセット): B0(埋め込み側・リップ下面) → B1(露出部のリップ下面)
+  // → B2(B0からリップ下面に垂直へ、体の腹側の肉内へ)。斜辺B1-B2が尾側の見えるフィレット面
   const fLen = embed + Math.min(4, s.lipLen * 0.45);
   const B0 = [P[0] + n[0] * ht + d[0] * 1.0, P[1] + n[1] * ht + d[1] * 1.0];
   const B1 = [P[0] + n[0] * ht + d[0] * fLen, P[1] + n[1] * ht + d[1] * fLen];
-  // ガセット高さ: 背中側へ突き抜けない範囲でクランプ
-  const hTopLocal = s.height * s.balance * profile(Math.min(Math.max(B0[0] / s.length, 0.02), 0.5), s.peak, s.noseFull, s.tailFull);
+  // ガセット高さ: 腹側へ突き抜けない範囲でクランプ
+  const hBotLocal = s.height * (1 - s.balance) * profile(Math.min(Math.max(B0[0] / s.length, 0.02), 0.5), s.peak, s.noseFull, s.tailFull);
   let gH = Math.min(2.5, s.height * 0.18);
-  if (n[1] > 0.2) gH = Math.min(gH, Math.max((hTopLocal * 0.8 - B0[1]) / n[1], 0.6));
+  if (n[1] < -0.2) gH = Math.min(gH, Math.max((-hBotLocal * 0.8 - B0[1]) / n[1], 0.6));
   const B2 = [B0[0] + n[0] * gH, B0[1] + n[1] * gH];
 
   const w = rootHW * 0.9;   // 幅はリップ根元幅の範囲(ボディ実幅クランプ済み)
