@@ -224,7 +224,7 @@
 
     <div class="section">
       <h2>アクション目安 <span style="color:var(--sub);font-weight:normal">(経験則)</span></h2>
-      <label class="check"><input type="checkbox" id="swimOn"> スイムプレビュー(演出)</label>
+      <label class="check"><input type="checkbox" id="swimOn"> スイムプレビュー(演出) <span style="color:var(--sub);font-weight:normal">[Space]</span></label>
       <div id="action"></div>
       <div class="note">流体シミュレーションではなく形状指標からの推定。実機テストのデータを蓄積して係数(CALIB)を調整していく。</div>
     </div>
@@ -1991,6 +1991,19 @@ document.getElementById('ballast').addEventListener('input', () => updateStats(0
 document.querySelectorAll('input[name=water]').forEach(r => r.addEventListener('change', () => updateStats(0)));
 document.getElementById('dlBtn').addEventListener('click', exportSTL);
 document.getElementById('swimOn').addEventListener('change', e => { swimEnabled = e.target.checked; });
+
+// スペースキーでスイムプレビューのオン/オフ(テキスト入力中やボタンフォーカス中は誤爆しないよう除外)
+window.addEventListener('keydown', e => {
+  if (e.code !== 'Space' && e.key !== ' ') return;
+  const t = e.target;
+  const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
+    || t.isContentEditable || t.tagName === 'BUTTON' || t.tagName === 'A');
+  if (typing) return;
+  e.preventDefault();   // ページスクロールを抑止
+  const cb = document.getElementById('swimOn');
+  cb.checked = !cb.checked;
+  swimEnabled = cb.checked;
+});
 
 /* ---- ビュー切替(ワンクリックで定型アングルへ) ---- */
 const lenDist = () => Math.max(state.length * 2.0, 140);
