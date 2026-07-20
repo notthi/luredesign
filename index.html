@@ -2011,8 +2011,8 @@ const sectionDist = () => Math.max(Math.max(state.height, state.width) * 7, 70);
 const VIEW_DIRS = {
   iso: { v: [-0.5, 0.42, 0.75], d: lenDist },   // 顔(ノーズ側)を手前に、やや背中側から見る既定アングル
   side: { v: [0, 0, 1], d: lenDist },
-  front: { v: [-1, 0, 0.02], d: sectionDist },  // ノーズ側から
-  back: { v: [1, 0, 0.02], d: sectionDist },    // テール側から(端面確認用)
+  front: { v: [-1, 0, 0], d: sectionDist },  // ノーズ側から(視線がX軸と一致、Y-upと直交のため傾き不要)
+  back: { v: [1, 0, 0], d: sectionDist },    // テール側から(端面確認用)
   top: { v: [0.02, 1, 0.02], d: lenDist },
   bottom: { v: [0.02, -1, 0.02], d: lenDist },
 };
