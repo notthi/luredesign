@@ -2004,9 +2004,14 @@ const VIEW_DIRS = {
   bottom: { v: [0.02, -1, 0.02], d: lenDist },
 };
 document.querySelectorAll('#viewBtns button').forEach(b => b.addEventListener('click', () => {
-  const { v, d } = VIEW_DIRS[b.dataset.view];
+  const view = b.dataset.view;
+  const { v, d } = VIEW_DIRS[view];
   const dist = d();
   const n = Math.hypot(v[0], v[1], v[2]);
+  // 上面/底面は視線がY軸にほぼ平行でcamera.upが不定になるため、
+  // 明示的に「頭(ノーズ=-X)が画面下」になるupを与えて向きを統一する。
+  // 毎フレームcontrols.update()がこのupでlookAtし直すため、他ビューに切り替えるまで維持する
+  camera.up.set(view === 'top' || view === 'bottom' ? 1 : 0, view === 'top' || view === 'bottom' ? 0 : 1, 0);
   camera.position.set(v[0] / n * dist, v[1] / n * dist, v[2] / n * dist);
   controls.target.set(0, 0, 0);
   controls.update();
