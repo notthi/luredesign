@@ -122,13 +122,13 @@ let session = null;
 let currentDetail = null;
 const myLikes = new Set();
 
-// params_json から自動タグ分類(投稿者の操作は不要)
-function classify(p) {
+// タグ分類: category(投稿者の手動指定)があれば優先し、なければparams_jsonから自動判定
+function classify(p, category) {
   if (!p) return { type: 'その他', size: '-' };
-  const type = p.cupOn ? 'ポッパー'
+  const type = category || (p.cupOn ? 'ポッパー'
     : !p.lipOn ? 'ペンシル・トップ'
     : p.lipAngle >= 45 ? 'クランク'
-    : 'ミノー';
+    : 'ミノー');
   const size = p.length < 60 ? '〜60mm' : p.length < 100 ? '60〜100mm' : '100mm〜';
   return { type, size };
 }
@@ -463,7 +463,7 @@ supabase.auth.onAuthStateChange(async (_ev, s) => {
 
 const { data, error } = await supabase
   .from('designs')
-  .select('id,name,thumb,updated_at,user_id,params_json,profiles!designs_user_profile_fkey(display_name),remix:remix_of(name),likes(count)')
+  .select('id,name,thumb,updated_at,user_id,params_json,category,profiles!designs_user_profile_fkey(display_name),remix:remix_of(name),likes(count)')
   .eq('is_public', true)
   .order('updated_at', { ascending: false })
   .limit(60);
@@ -478,7 +478,7 @@ if (error) {
   designs = (data ?? []).map(d => ({
     ...d,
     likeCount: d.likes?.[0]?.count ?? 0,
-    tags: classify(d.params_json),
+    tags: classify(d.params_json, d.category),
   }));
   await loadMyLikes();
   render();

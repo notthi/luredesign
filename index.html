@@ -248,6 +248,16 @@
             <option value="public">ギャラリーに公開</option>
           </select>
         </div>
+        <div class="row"><label>カテゴリ</label>
+          <select id="category">
+            <option value="">自動判定</option>
+            <option value="ミノー">ミノー</option>
+            <option value="クランク">クランク</option>
+            <option value="ポッパー">ポッパー</option>
+            <option value="ペンシル・トップ">ペンシル・トップ</option>
+          </select>
+        </div>
+        <div class="note">ギャラリーの分類はリップ角度等から自動判定するが、形が特殊で誤判定される場合はここで上書きできる。</div>
         <div class="row">
           <button id="saveBtn" style="flex:1;background:var(--accent);color:#06283c;font-weight:bold;border:none">💾 保存</button>
           <button id="newBtn">新規</button>
@@ -1832,6 +1842,7 @@ async function saveDesign() {
   const d = collectDesign();
   d.is_public = $('visibility').value === 'public';
   d.unlisted = $('visibility').value === 'unlisted';
+  d.category = $('category').value || null;   // 空="自動判定"はnullでギャラリー側の自動分類に任せる
   const thumb = captureThumb();
   if (thumb) d.thumb = thumb;
   if (!currentDesignId && remixSourceId) d.remix_of = remixSourceId;
@@ -1886,6 +1897,7 @@ function resolveUrlDesignOwnership() {
     currentDesignId = d.id;
     remixSourceId = null;
     $('visibility').value = d.is_public ? 'public' : d.unlisted ? 'unlisted' : 'private';
+    $('category').value = d.category || '';
     $('remixNote').style.display = 'none';
     cloudMsg(`「${d.name}」を編集中`);
   } else {
@@ -1949,6 +1961,7 @@ $('newBtn').addEventListener('click', () => {
   loadedFromUrl = null;
   $('designName').value = '';
   $('visibility').value = 'private';
+  $('category').value = '';
   $('remixNote').style.display = 'none';
   cloudMsg('新規デザイン(次の保存で新しい行になる)');
 });
@@ -1962,6 +1975,7 @@ $('loadBtn').addEventListener('click', async () => {
   loadedFromUrl = null;
   $('designName').value = data.name;
   $('visibility').value = data.is_public ? 'public' : data.unlisted ? 'unlisted' : 'private';
+  $('category').value = data.category || '';
   $('remixNote').style.display = 'none';
   applyDesign(data.params_json, data.paint_json);
   cloudMsg(`「${data.name}」を開いた`);
@@ -2060,7 +2074,28 @@ for (const name of Object.keys(PRESETS)) {
   presetSel.appendChild(opt);
 }
 presetSel.value = 'バス ミノー 90mm';
-presetSel.addEventListener('change', () => applyPreset(presetSel.value));
+let lastAppliedPreset = presetSel.value;
+presetSel.addEventListener('change', () => {
+  // 保存済み/リミックス元のデザインを開いたままテンプレートを切り替えると、
+  // 気づかずに保存して元のデザインを別形状で上書きしてしまう事故が起きるため、
+  // 編集中の紐付けがある場合は確認のうえ「新規」扱いにしてから適用する
+  if (currentDesignId || remixSourceId) {
+    const label = $('designName')?.value.trim() || '無題のルアー';
+    const ok = confirm(`「${label}」を編集中です。テンプレートを読み込むと保存時は新しいデザインとして保存され、元のデザインは上書きされません。続けますか？`);
+    if (!ok) { presetSel.value = lastAppliedPreset; return; }
+    // 「新規」ボタンと同じ状態にリセットし、元のデザインの名前・公開設定を引きずらない
+    currentDesignId = null;
+    remixSourceId = null;
+    loadedFromUrl = null;
+    $('designName').value = '';
+    $('visibility').value = 'private';
+    $('category').value = '';
+    $('remixNote').style.display = 'none';
+    cloudMsg('新規デザイン(次の保存で新しい行になる)');
+  }
+  lastAppliedPreset = presetSel.value;
+  applyPreset(presetSel.value);
+});
 
 function applyPreset(name) {
   const p = PRESETS[name];
