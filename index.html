@@ -163,14 +163,12 @@
       <h2>カップ(ポッパー)</h2>
       <label class="check"><input type="checkbox" id="cupOn"> カップあり(口が凹む)</label>
       <div id="cupControls"></div>
-      <div class="note">レッドヘッド等のヘッドカラーは口の中まで塗られる。深さは内部空洞と干渉しない範囲に自動制限。</div>
     </div>
 
     <div class="section">
       <h2>ジョイント</h2>
       <label class="check"><input type="checkbox" id="jointOn"> ジョイントあり(2分割)</label>
       <div id="jointControls"></div>
-      <div class="note">垂直の平面カットで前後2ピースに分割。両分割面の中心に接続用ヒートンの目印凹みを自動生成し、分割面の裏には5mmのソリッド壁を確保。ヒートン2本をスプリットリング等で連結して組み立てる。V字カットや多連ジョイントは今後。</div>
     </div>
 
     <div class="section">
@@ -197,14 +195,12 @@
       <div class="row"><label>模様の濃さ</label><input type="range" id="cPatAlpha" min="0.05" max="1" step="0.01"><span class="val" id="val-cPatAlpha"></span></div>
       <div class="row"><label>目玉の色</label><input type="color" id="cEye"></div>
       <div id="eyeControls"></div>
-      <div class="note">UV展開した2Dテンプレートにレイヤー描画し、3Dへリアルタイム反映。塗り設定はJSONとして保存可能(SPEC 3.3 / paint_json)。</div>
     </div>
 
     <div class="section">
       <h2>内部構造</h2>
       <label class="check"><input type="checkbox" id="hollowOn" checked> 中空化(薄殻+ヒートン隔壁)</label>
       <label class="check"><input type="checkbox" id="cutaway"> 断面表示(内部を確認)</label>
-      <div class="note">ノーズ・テールのソリッド栓と、腹ヒートン位置(全長45%)のくさび形隔壁(腹側5mm厚→背中側1.4mm)にヒートン(ネジ式アイ)をねじ込む。隔壁は全周が殻に接続するためサポートレスで印刷可。3点のヒートン位置には目印の凹み(半径0.75mm)をSTLに自動生成。下穴の完全自動配置(径・深さ指定)は次スパイク。</div>
     </div>
 
     <div class="section">
@@ -283,7 +279,7 @@
       <button id="lipStlBtn" style="width:100%;margin-top:8px;display:none">⬇ リップ単体STL (平置き印刷用)</button>
       <button id="lipSvgBtn" style="width:100%;margin-top:8px;display:none">📐 リップ型紙 (SVG / ポリカ板切り出し用)</button>
       <button id="orderBtn" style="width:100%;margin-top:8px">🧾 注文確認シート画像 (プリント依頼用)</button>
-      <div class="note">単位: mm / スライスは壁3周・インフィル50%以上を推奨(ヒートン保持力)。<b>左右分割</b>は接着面をベッドに向けた平置き配置で出力され、回転なしでそのままスライス可(サポート不要・接着はエポキシ等)。分割時のリップは自動的に別体扱い(ボディにスリット生成、リップ単体STL/型紙SVGで組み立て)。一体を立てて印刷する場合はラフト+ブリム推奨。位置決めダボ・ウェイトチャンバーは次スパイク。</div>
+      <div class="note">単位: mm / スライスは壁3周・インフィル50%以上を推奨(ヒートン保持力)。<b>一体</b>はテールを下にした縦置き姿勢で出力(回転不要)。接地面が小さい場合はラフト+ブリム推奨、テール端面を広げるとより安定。<b>左右分割</b>は接着面をベッドに向けた平置き配置で出力され、回転なしでそのままスライス可(サポート不要・接着はエポキシ等)。分割時のリップは自動的に別体扱い(ボディにスリット生成、リップ単体STL/型紙SVGで組み立て)。位置決めダボ・ウェイトチャンバーは次スパイク。</div>
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--sub);padding:4px 0 12px">
@@ -1421,12 +1417,20 @@ function exportSTL() {
   // 一体: リップをCSGユニオンした単一ソリッドで出力(別体リップ時はスリット入りボディのみ)
   const { geo, lipUnioned } = buildWholeExportGeometry();
   const geos = [geo];
-  // CSGが使えなかった場合のフォールバック(従来の重なりシェル)
+  // CSGが使えなかった場合のフォールバック(従来の重なりシェル)。ビューポート表示中の
+  // 実体を汚さないよう複製してから使う(この後の向き調整はin-place変形のため)
   if (state.lipOn && state.lipMode !== 'separate' && !lipUnioned && lipMesh) {
-    geos.push(lipMesh.geometry);
-    if (filletMesh) geos.push(filletMesh.geometry);
+    geos.push(lipMesh.geometry.clone());
+    if (filletMesh) geos.push(filletMesh.geometry.clone());
   }
-  writeBinarySTL(geos, `lure_${state.length}mm.stl`);
+  // テールを下(ベッド接地)にした縦置き姿勢へ回転。テール端面を設定していれば
+  // その平面がそのままベッド面になる
+  const standing = geos.map(g => {
+    g.rotateY(Math.PI / 2);          // 長さ軸(X)をZへ: ノーズ(x=0)→z=0, テール(x=L)→z=-L
+    g.translate(0, 0, state.length); // テールをz=0へ、ノーズをz=Lへ持ち上げる
+    return g;
+  });
+  writeBinarySTL(standing, `lure_${state.length}mm.stl`);
 }
 
 // 左右分割: ボディ(+一体リップ)をz=0面(左右対称面)で2分割し、
