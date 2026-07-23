@@ -1808,7 +1808,7 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
 }
 
 $('loginBtn').addEventListener('click', () =>
-  supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } }));
+  supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: 'select_account' } } }));
 $('logoutBtn').addEventListener('click', () => supabase.auth.signOut());
 
 function collectDesign() {
